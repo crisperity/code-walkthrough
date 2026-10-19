@@ -28,6 +28,7 @@ Stdlib only, no network.
 
 import argparse
 import json
+import math
 import re
 import sys
 from datetime import datetime
@@ -326,23 +327,50 @@ def _ctx_ref(ref, files):
     return '<span class="cw-ctx-ev cw-ctx-none">not in diff</span>'
 
 
-def context_html(ctx, files, current_head="", building=False):
+def _ctx_form_html():
+    return ('<form class="cw-ctx-link"><span class="cw-ctx-empty">No linked ticket found.</span>'
+            '<input type="text" name="ticket" class="cw-ctx-input" autocomplete="off" maxlength="500"'
+            ' placeholder="Paste a Jira / GitHub / Linear link or key" aria-label="Ticket link or key">'
+            '<button type="submit" class="cw-ctx-submit">Link ticket</button>'
+            '<p class="cw-ctx-msg" aria-live="polite"></p></form>')
+
+
+def clean_ticket_hint(raw):
+    """{key, found_in} for a ticket hint the daemon detected, or None. The key is only ever shown
+    as text and prefilled into the link form, so it is capped, not matched against a pattern."""
+    key = raw.get("key") if isinstance(raw, dict) else None
+    if not isinstance(key, str) or not key.strip():
+        return None
+    found = raw.get("found_in")
+    at = raw.get("at")
+    return {"key": key.strip()[:80], "found_in": found if isinstance(found, str) and found in _CTX_FOUND_IN else None,
+            "at": at if isinstance(at, (int, float)) and not isinstance(at, bool) and math.isfinite(at) else None}
+
+
+def context_html(ctx, files, current_head="", building=False, hint=None):
     """The Context card, or the empty-state form when there is no ticket context. `files` is the
     parsed diff (a ref links only when its path is in it); `current_head` is the page's head sha,
-    compared with the one the comparison was made against. While `building`, a missing context is
-    a skeleton, since the ticket may still turn up."""
+    compared with the one the comparison was made against. A missing context is a skeleton while
+    `building` or when a ticket `hint` was detected (the agent's comparison is still to come; the
+    page swaps the skeleton for the link form, prefilled, after a wait)."""
+    if not ctx and hint:
+        found = _CTX_FOUND_IN.get(hint.get("found_in"))
+        return ('<section class="cw-context" id="cw-context" aria-labelledby="cw-context-h"'
+                f' data-ticket-hint="{escape(hint["key"])}"' + (f' data-hint-at="{int(hint["at"])}"' if hint.get("at") else "")
+                + '><h2 id="cw-context-h">Context</h2>'
+                '<div class="cw-ctx-card"><div class="cw-ctx-head"><span class="cw-ctx-glyph" aria-hidden="true">'
+                f'&#9670;</span><span class="cw-ctx-key">{escape(hint["key"])}</span>'
+                + (f'<span class="cw-ctx-found">found in {found}</span>' if found else "")
+                + '</div><p class="cw-ctx-empty">Comparing with the diff</p>'
+                '<span class="cw-skel-line" aria-busy="true"></span></div>'
+                f'<template>{_ctx_form_html()}</template></section>')
     if not ctx and building:
         return ('<section class="cw-context" id="cw-context" aria-labelledby="cw-context-h">'
                 '<h2 id="cw-context-h">Context</h2><span class="cw-skel-line" aria-busy="true"></span>'
                 '<span class="cw-skel-line" aria-busy="true"></span></section>')
     if not ctx:
         return ('<section class="cw-context" id="cw-context" aria-labelledby="cw-context-h">'
-                '<h2 id="cw-context-h">Context</h2><form class="cw-ctx-link">'
-                '<span class="cw-ctx-empty">No linked ticket found.</span>'
-                '<input type="text" name="ticket" class="cw-ctx-input" autocomplete="off" maxlength="500"'
-                ' placeholder="Paste a Jira / GitHub / Linear link or key" aria-label="Ticket link or key">'
-                '<button type="submit" class="cw-ctx-submit">Link ticket</button>'
-                '<p class="cw-ctx-msg" aria-live="polite"></p></form></section>')
+                f'<h2 id="cw-context-h">Context</h2>{_ctx_form_html()}</section>')
     t = ctx.get("ticket")
     head = ""
     if t:
@@ -382,7 +410,7 @@ def context_html(ctx, files, current_head="", building=False):
 
 def render_html(analysis, files, template, walkthrough="", links=None, title=None,
                 now=None, complexity=None, state=None, explain=False, order=None,
-                symdelta=None, visuals=None, context=None, building=False):
+                symdelta=None, visuals=None, context=None, building=False, ticket_hint=None):
     target = analysis.get("target") or ""
     count, added, removed, net = counts_from(files)
     sign = "+" if net >= 0 else ""
@@ -415,7 +443,7 @@ def render_html(analysis, files, template, walkthrough="", links=None, title=Non
     body.append("</div>")
 
     if not explain:
-        body.append(context_html(context, files, (links or {}).get("head_sha", ""), building))
+        body.append(context_html(context, files, (links or {}).get("head_sha", ""), building, ticket_hint))
 
     overview = _paragraphs(analysis.get("overview"))
     if overview:
@@ -517,6 +545,7 @@ def main():
     parser.add_argument("--symdelta", help="symdelta.json, for the All symbols graph")
     parser.add_argument("--visuals", help="visuals.json, re-checked here before anything is inlined")
     parser.add_argument("--context", help="context.json, re-checked here before anything is inlined")
+    parser.add_argument("--ticket-hint", help="JSON {key, found_in} the daemon detected, for the Context skeleton")
     parser.add_argument("--template", required=True, help="the page template")
     parser.add_argument("--state", help="state.json, inlined behind HR_STATE")
     parser.add_argument("--title")
@@ -548,11 +577,16 @@ def main():
         if lines:
             print("\n".join(lines), file=sys.stderr)
 
+    try:
+        hint = clean_ticket_hint(json.loads(args.ticket_hint)) if args.ticket_hint else None
+    except ValueError:
+        hint = None
+
     sys.stdout.write(render_html(
         analysis, files, _read(args.template),
         _read(args.walkthrough), links, args.title,
         complexity=complexity, state=state, explain=args.explain, order=order,
-        symdelta=symdelta, visuals=clean, context=context, building=args.building,
+        symdelta=symdelta, visuals=clean, context=context, building=args.building, ticket_hint=hint,
     ))
     return 0
 

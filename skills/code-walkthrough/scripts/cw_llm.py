@@ -585,6 +585,50 @@ def _render_claude_prompt(messages):
     return "\n\n".join(parts)
 
 
+_JSON_TYPES = {
+    "array": list, "object": dict, "null": type(None), "string": str,
+    "boolean": bool, "integer": int, "number": (int, float),
+}
+
+
+def _allowed_types(prop):
+    types = set()
+    for sub in [prop] + list(prop.get("anyOf") or []) + list(prop.get("oneOf") or []):
+        t = sub.get("type")
+        types.update(t if isinstance(t, list) else [t] if t else [])
+    return types
+
+
+def _type_ok(value, types):
+    for t in types:
+        py = _JSON_TYPES.get(t)
+        if py and isinstance(value, py) and not (isinstance(value, bool) and t in ("integer", "number")):
+            return True
+    return False
+
+
+def coerce_structured(structured, schema):
+    """claude-code sometimes returns non-string fields as JSON-encoded strings; decode those
+    top-level values back when the schema forbids a string there and the decode fits."""
+    props = (schema or {}).get("properties") or {}
+    out = dict(structured)
+    for key, value in structured.items():
+        types = _allowed_types(props.get(key) or {})
+        if not isinstance(value, str) or not types:
+            continue
+        if "string" in types:
+            if value == "null" and "null" in types:
+                out[key] = None
+            continue
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            continue
+        if _type_ok(parsed, types):
+            out[key] = parsed
+    return out
+
+
 def _run_claude_tools(profile, messages, tools, handlers, *, max_rounds, timeout, on_usage, cwd):
     # ponytail: max_tokens/nudge are HTTP-path knobs; each claude process runs its own tool
     # loop and timeout_s is the only budget here.
@@ -627,6 +671,7 @@ def _run_claude_tools(profile, messages, tools, handlers, *, max_rounds, timeout
         structured = out.get("structured_output")
         if not isinstance(structured, dict):
             raise LLMError("claude-code reply had no structured output", kind="protocol")
+        structured = coerce_structured(structured, schema)
         messages.append({
             "role": "assistant", "content": json.dumps(structured),
             "permission_denials": out.get("permission_denials"),
