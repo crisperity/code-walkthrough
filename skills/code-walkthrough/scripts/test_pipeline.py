@@ -540,3 +540,14 @@ def test_unpushed_head_still_gives_state_its_repo_and_pr_identity():
         meta = json.loads((d / "state.json").read_text())["meta"]
         assert (meta["repo"], meta["pr"], meta["head_pushed"]) == ("o/r", 7, False)
         assert json.loads((d / "pipeline.json").read_text())["links_ok"] is False
+
+
+def test_render_flags_carry_the_ticket_hint_the_caller_passes():
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        assert "--ticket-hint" not in pipeline._optional_data_flags(d)
+
+        flags = pipeline._optional_data_flags(d, '{"key": "TD-218"}')
+
+        assert flags[flags.index("--ticket-hint") + 1] == '{"key": "TD-218"}'
+

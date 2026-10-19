@@ -1294,6 +1294,13 @@
 <!-- DIFF_CONTENT -->
 </div>
 <!-- HR_STATE -->
+<script>
+if(window.CW_LIVE){
+  // Captured before any script paints skeletons or rewires blocks, so it matches the served HTML.
+  window.__cwBase={state:(document.getElementById('hr-state')||{}).textContent||'',
+    blocks:[...document.getElementById('plan-content').children].map((c,i)=>{ const h=c.outerHTML; c.dataset.cwb=i; return h; })};
+}
+</script>
 
 <dialog id="mermaid-zoom" aria-label="Diagram, full size">
   <button id="mermaid-zoom-close" aria-label="Close diagram view">✕</button>
@@ -6468,6 +6475,23 @@ function wireCtxLink(form){
   });
 }
 document.querySelectorAll('form.cw-ctx-link').forEach(wireCtxLink);
+function armCtxHint(){
+  document.querySelectorAll('#cw-context[data-ticket-hint]:not([data-armed])').forEach(sec=>{
+    sec.dataset.armed='1';
+    const at=+sec.dataset.hintAt;
+    const left=at?Math.max(0,120000-(Date.now()-at*1000)):120000;
+    sec.__cwTimer=setTimeout(()=>{
+      const tpl=sec.querySelector('template'), card=sec.querySelector('.cw-ctx-card');
+      if(!sec.isConnected||!tpl||!card) return;
+      const form=tpl.content.firstElementChild.cloneNode(true);
+      form.querySelector('.cw-ctx-input').value=sec.dataset.ticketHint;
+      form.querySelector('.cw-ctx-empty').textContent='Not compared yet. Confirm the ticket:';
+      card.replaceWith(form);
+      wireCtxLink(form);
+    },left);
+  });
+}
+armCtxHint();
 </script>
 <script>
 (function(){
@@ -6630,9 +6654,60 @@ document.querySelectorAll('form.cw-ctx-link').forEach(wireCtxLink);
       document.body.appendChild(btn);
     }
 
-    function onPageUpdated(){
+    // BOUND must list every block that load-time scripts bind to, or an in-place swap breaks it.
+    const BOUND='details,.mermaid,svg,pre,dialog,script,.cw-vis,[data-ov-zoom],#wt-ctl,.h2-row,h3.wt-group';
+    const isBound=n=>n.matches(BOUND)||!!n.querySelector(BOUND);
+
+    function swapInPlace(html){
+      const base=window.__cwBase, root=document.getElementById('plan-content');
+      const next=new DOMParser().parseFromString(html,'text/html');
+      const nextRoot=next.getElementById('plan-content');
+      if(!base||!root||!nextRoot) return false;
+      const nextState=(next.getElementById('hr-state')||{}).textContent||'';
+      const blocks=[...nextRoot.children];
+      if(nextState!==base.state||blocks.length!==base.blocks.length) return false;
+      const changed=[];
+      for(let i=0;i<blocks.length;i++){
+        if(blocks[i].outerHTML===base.blocks[i]) continue;
+        const o=root.querySelector(':scope > [data-cwb="'+i+'"]');
+        if(!o||isBound(o)||isBound(blocks[i])) return false;
+        changed.push([i,o,blocks[i]]);
+      }
+      const y=window.scrollY;
+      changed.forEach(([i,o,n])=>{
+        const fresh=document.importNode(n,true);
+        fresh.dataset.cwb=i;
+        clearTimeout(o.__cwTimer);
+        o.replaceWith(fresh);
+        fresh.querySelectorAll('form.cw-ctx-link').forEach(wireCtxLink);
+      });
+      window.__cwBase={state:nextState,blocks:blocks.map(b=>b.outerHTML)};
+      armCtxHint();
+      window.scrollTo(0,y);
+      return true;
+    }
+
+    let updateTimer=null, firstAt=0, seq=0, wantRev=LIVE.rev;
+    function applyUpdate(){
       if(busyEditing()){ showReloadPill(); return; }
-      doReload();
+      const my=++seq, rev=wantRev;
+      fetch(location.href,{cache:'no-store'}).then(r=>r.ok?r.text():Promise.reject(new Error('page')))
+        .then(html=>{
+          if(my!==seq) return;
+          if(busyEditing()){ showReloadPill(); return; }
+          let ok=false;
+          try{ ok=swapInPlace(html); }catch(e){ ok=false; }
+          if(ok) LIVE.rev=Math.max(LIVE.rev,rev); else doReload();
+        })
+        .catch(showReloadPill);
+    }
+
+    function onPageUpdated(rev){
+      if(typeof rev==='number'&&rev>wantRev) wantRev=rev;
+      const now=Date.now();
+      if(!updateTimer) firstAt=now;
+      clearTimeout(updateTimer);
+      updateTimer=setTimeout(()=>{ updateTimer=null; applyUpdate(); },Math.max(0,Math.min(1000,firstAt+5000-now)));
     }
 
     try{
@@ -6650,7 +6725,7 @@ document.querySelectorAll('form.cw-ctx-link').forEach(wireCtxLink);
       liveStatus=data.status; liveError=data.error; liveRemedy=data.remedy;
       liveSteps=data.steps||{}; liveBatches=data.batches||liveBatches; liveTotal=data.total||liveTotal;
       renderBanner();
-      if(typeof data.rev==='number'&&data.rev>LIVE.rev) onPageUpdated();
+      if(typeof data.rev==='number'&&data.rev>LIVE.rev) onPageUpdated(data.rev);
       if(window.__cwOnSnapshot) window.__cwOnSnapshot(data);
     });
     es.addEventListener('step',e=>{
@@ -6667,7 +6742,10 @@ document.querySelectorAll('form.cw-ctx-link').forEach(wireCtxLink);
       liveTotal=data.total||liveTotal;
       renderBanner();
     });
-    es.addEventListener('rebuilt',()=>{ onPageUpdated(); });
+    es.addEventListener('rebuilt',e=>{
+      const data=JSON.parse(e.data);
+      onPageUpdated(data.rev);
+    });
     es.addEventListener('thread',e=>{
       if(window.__cwOnThread) window.__cwOnThread(JSON.parse(e.data));
     });

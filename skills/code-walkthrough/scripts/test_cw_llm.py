@@ -15,6 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import cw_llm  # noqa: E402
+import cw_run  # noqa: E402
 import cw_testlib  # noqa: E402
 
 PING_TOOLS = [{"type": "function", "function": {"name": "ping", "parameters": {"type": "object", "properties": {}}}}]
@@ -275,6 +276,60 @@ def test_run_claude_tools_feedback_then_done_runs_two_processes():
             second_stdin = fc.log()[-1]["stdin"]
             assert "Your previous answer" in second_stdin
             assert "needs more detail" in second_stdin
+
+
+STRINGIFIED = {
+    "thread_id": "t1", "outcome": "fix", "why": "w", "confidence": "high",
+    "commits": '["b30d79bf"]', "files": '[{"path": "a.py"}]',
+    "closing_message": "null", "ticket": "null", "need_diffs_for": '["f6c8"]',
+}
+RESOLUTION_SCHEMA = cw_run._resolution_submit_tool()["function"]["parameters"]
+
+
+def test_coerce_structured_decodes_stringified_resolution():
+    got = cw_llm.coerce_structured(STRINGIFIED, RESOLUTION_SCHEMA)
+    assert got["commits"] == ["b30d79bf"]
+    assert got["files"] == [{"path": "a.py"}]
+    assert got["closing_message"] is None and got["ticket"] is None
+    assert got["need_diffs_for"] == ["f6c8"]
+    assert got["why"] == "w" and got["thread_id"] == "t1"
+
+
+def test_coerce_structured_string_field_keeps_literal_null():
+    schema = {"properties": {"s": {"type": "string"}, "t": {"anyOf": [{"type": "string"}, {"type": "null"}]}}}
+    assert cw_llm.coerce_structured({"s": "null", "t": "[1]"}, schema) == {"s": "null", "t": "[1]"}
+    assert cw_llm.coerce_structured({"t": "null"}, schema) == {"t": None}
+
+
+def test_coerce_structured_leaves_unparseable_and_wrong_typed_strings():
+    schema = {"properties": {"a": {"type": "array"}, "n": {"type": "integer"}, "o": {"type": "object"}}}
+    payload = {"a": "not json", "n": "[1]", "o": "[1]", "extra": "[1]"}
+    assert cw_llm.coerce_structured(payload, schema) == payload
+
+
+def test_coerce_structured_correct_payload_unchanged():
+    payload = {"thread_id": "t1", "commits": ["x"], "files": [], "ticket": None}
+    assert cw_llm.coerce_structured(payload, RESOLUTION_SCHEMA) == payload
+
+
+def test_run_claude_tools_coerces_stringified_args_before_handler():
+    cw_testlib.require_posix()
+    with cw_testlib.temp_home() as tmp:
+        script = {"sonnet": [cw_testlib.claude_result(structured=STRINGIFIED)]}
+        with cw_testlib.fake_claude(tmp, script):
+            seen = {}
+
+            def handler(args):
+                seen.update(args)
+                return cw_llm.Done(args)
+
+            messages = [{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}]
+            cw_llm.run_tools(
+                {"kind": "claude-code", "model": "sonnet"}, messages,
+                [cw_run._resolution_submit_tool()], {"submit_resolution": handler}, cwd=Path(tmp))
+    assert seen["commits"] == ["b30d79bf"] and seen["files"] == [{"path": "a.py"}]
+    assert seen["ticket"] is None and seen["closing_message"] is None
+    assert json.loads(messages[-1]["content"])["commits"] == ["b30d79bf"]
 
 
 def test_claude_call_usage_mapping_and_cost_none():
