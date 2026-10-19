@@ -215,6 +215,11 @@ def test_style_allowed_forms_are_normalised():
     assert "grid-column: 1 / 3" in out
 
 
+def test_style_border_collapse_is_stripped_not_rejected():
+    out, probs = san(styled("border-collapse: collapse;width:100%"))
+    assert probs == [] and "border-collapse" not in out and "width: 100%" in out
+
+
 def test_style_error_lines_name_the_problem():
     _, probs = san(styled("position:fixed;background:url(x)"))
     assert any("'position'" in p for p in probs)
@@ -562,18 +567,25 @@ def test_overview_valid_passes_and_symdelta_label_or_diff_identifier_anchor_refs
     assert clean["notes"][0]["kind"] == "config" and clean["edges"][0]["label"] == ""
 
 
+def test_overview_ref_with_unknown_symbol_falls_back_to_bare_path_without_problem():
+    o = overview()
+    o["nodes"][3]["refs"] = ["user/preferences/tools.py:is_loosening", "user/preferences/tools.py:12"]
+    clean, probs = ov(o)
+    assert probs == [] and clean["nodes"][3]["refs"] == ["user/preferences/tools.py"] * 2
+
+
 def test_overview_bad_ref_dropped_with_exact_message_and_anchored_node_survives():
     o = overview()
-    o["nodes"][3]["refs"] = ["user/preferences/tools.py:is_loosening"]
+    o["nodes"][3]["refs"] = ["other/file.py:is_loosening"]
     o["nodes"][3]["group"] = 0
     clean, probs = ov(o)
-    assert "overview.nodes[3].refs[0]: user/preferences/tools.py:is_loosening not in diff" in probs
+    assert "overview.nodes[3].refs[0]: other/file.py:is_loosening not in diff" in probs
     assert clean["nodes"][3]["refs"] == [] and clean["nodes"][3]["group"] == 0
 
 
 def test_overview_unanchored_node_dropped_with_its_edges():
     o = overview()
-    o["nodes"][3]["refs"] = ["user/preferences/tools.py:is_loosening"]
+    o["nodes"][3]["refs"] = ["other/file.py:is_loosening"]
     clean, probs = ov(o)
     assert [n["id"] for n in clean["nodes"]] == ["wrap", "bq", "cost", "appr", "card", "waiter"]
     assert all("prefs" not in (e["from"], e["to"]) for e in clean["edges"])
@@ -596,7 +608,7 @@ def test_overview_bad_edge_endpoint_and_kind_dropped():
                    {"from": "wrap", "to": "card", "kind": "weird"}]
     clean, probs = ov(o)
     assert len(clean["edges"]) == 6
-    assert sum("edges[" in p for p in probs) == 3
+    assert sum("edges[" in p for p in probs) == 2
 
 
 def test_overview_limits_truncate_and_report():
@@ -667,7 +679,7 @@ def test_check_visuals_wires_overview_and_keeps_legacy_pr():
     clean, probs = v.check_visuals({"overview": overview(), "pr": {"title": "t", "html": OK}, "groups": []}, 2, CTX)
     assert probs == [] and clean["overview"]["title"] and clean["pr"]["html"] == OK
     o = overview()
-    o["nodes"][3]["refs"] = ["user/preferences/tools.py:is_loosening"]
+    o["nodes"][3]["refs"] = ["other/file.py:is_loosening"]
     clean, probs = v.check_visuals({"overview": o}, 2, CTX)
     assert any("is_loosening not in diff" in p for p in probs) and clean["overview"] is not None
     assert v.check_visuals({"overview": None}, 2) == ({"pr": None, "overview": None, "groups": {}}, [])
@@ -683,9 +695,10 @@ def test_cli_check_with_diff_and_symdelta(tmp_path):
     r = run_cli("check", "--visuals", str(f), "--groups", "2", "--diff", str(tmp_path / "d.diff"),
                 "--symdelta", str(tmp_path / "s.json"))
     assert r.returncode == 0 and r.stdout.strip() == "ok"
-    f.write_text(json.dumps({"overview": overview(), "groups": []}))
+    o["nodes"][2]["refs"] = ["other/file.py:cost_gate"]
+    f.write_text(json.dumps({"overview": o, "groups": []}))
     r = run_cli("check", "--visuals", str(f), "--groups", "2", "--diff", str(tmp_path / "d.diff"))
-    assert r.returncode == 1 and "cost.py:cost_gate not in diff" in r.stdout
+    assert r.returncode == 1 and "other/file.py:cost_gate not in diff" in r.stdout
 
 
 CALLS_DIFF = """diff --git a/a.py b/a.py

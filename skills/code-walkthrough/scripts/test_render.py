@@ -992,11 +992,11 @@ def test_a_group_picture_out_of_range_renders_nothing():
     assert "nope" not in out and "cw-picture:" not in out
 
 
-def test_all_symbols_is_collapsed_once_after_the_walkthrough_only_with_symbols():
+def test_all_symbols_is_collapsed_once_before_the_walkthrough_only_with_symbols():
     out = pics(symdelta=GRAPH_SD)
 
     assert out.count(ALL_SYMS) == 1 and out.count('class="vd-symbols') == 1
-    assert out.index(">b</details>") < out.index(ALL_SYMS) < out.index('<div class="foot">')
+    assert out.index(ALL_SYMS) < out.index("<span>Walkthrough</span>")
     assert "<details class=\"cw-allsyms\" open" not in out
     for none in (None, {"nodes": []}, {"language": None}):
         assert "cw-allsyms" not in pics(symdelta=none)
@@ -1549,7 +1549,7 @@ def test_context_escapes_every_field_and_refuses_a_non_http_url():
     clean, problems = clean_context(raw)
     page = html(context=clean)
 
-    assert "<script>" not in page and page.count("&lt;script&gt;") == 7
+    assert "<script>" not in page and page.count("&lt;script&gt;") == 6
     assert "href" not in page.split('id="cw-context"')[1].split("</section>")[0]
     assert any("ticket.url" in p for p in problems)
 
@@ -1581,12 +1581,12 @@ def test_context_empty_state_is_a_form_with_a_labelled_input_and_a_live_message(
 
 def test_context_clean_drops_bad_items_and_caps_without_losing_the_rest():
     raw = _ctx(items=[{"status": "bogus", "text": "x"}, {"status": "covered", "text": "y" * 500, "ref": "nocolon"}]
-               + [{"status": "extra", "text": "z"}] * 25, gaps=["g"] * 12)
+               + [{"status": "extra", "text": "z"}] * 25)
     raw["ticket"]["key"] = "K" * 90
     clean, problems = clean_context(raw)
 
     assert len(clean["items"]) == 19 and clean["items"][0]["text"] == "y" * 200 and clean["items"][0]["ref"] is None
-    assert len(clean["gaps"]) == 8 and clean["ticket"]["key"] == "K" * 40
+    assert "gaps" not in clean and clean["ticket"]["key"] == "K" * 40
     assert any("items[0]" in p for p in problems)
     assert clean_context(_ctx(ticket={"source": "bogus", "key": "A-1"}))[0]["ticket"] is None
     assert clean_context({"items": [{"status": "bogus", "text": "x"}]})[0] is None
@@ -1597,12 +1597,34 @@ def test_context_clean_drops_non_string_values_instead_of_raising():
     clean, problems = clean_context(_ctx(
         ticket={"source": ["jira"], "key": 5, "found_in": {}},
         items=[{"status": ["covered"], "text": "a"}, {"status": "covered", "text": 7},
-               {"status": "covered", "text": "ok", "ref": 3}, {"status": "extra", "text": "u", "ref": ["a:1"]}],
-        gaps=[1, None, "g"]))
+               {"status": "covered", "text": "ok", "ref": 3}, {"status": "extra", "text": "u", "ref": ["a:1"]}]))
     assert clean["ticket"] is None and [i["text"] for i in clean["items"]] == ["ok", "u"]
-    assert all(i["ref"] is None for i in clean["items"]) and clean["gaps"] == ["g"]
+    assert all(i["ref"] is None for i in clean["items"])
     t, _ = clean_context(_ctx(ticket={"source": "jira", "key": "A-1", "found_in": {}, "url": ["x"]}))
     assert t["ticket"]["found_in"] is None and t["ticket"]["url"] is None
+
+
+def test_context_ignores_a_legacy_gaps_key():
+    clean, _ = clean_context(_ctx())
+
+    assert "gaps" not in clean and "cw-ctx-gap" not in html(context=clean)
+
+
+def test_building_page_shows_skeletons_for_verdict_and_context_not_the_link_form():
+    blank = {**ANALYSIS, "verdict": ""}
+    page = html(blank, building=True)
+
+    assert page.count("cw-skel-line") == 3 and "cw-ctx-link" not in page.split("<h2>Overview")[0]
+    assert 'id="cw-context"' in page
+    final = html(blank)
+    assert "cw-skel-line\"" not in final and '<form class="cw-ctx-link">' in final
+
+
+def test_building_page_keeps_a_real_verdict_and_context():
+    clean, _ = clean_context(_ctx())
+    page = html(building=True, context=clean)
+
+    assert "cw-skel-line\"" not in page and "cw-ctx-card" in page
 
 
 def test_context_stale_line_appears_only_when_the_head_moved():
@@ -1612,3 +1634,21 @@ def test_context_stale_line_appears_only_when_the_head_moved():
     assert "Compared against abcdef1, head is now 9999999" in context_html(clean, files, "9999999aaaa")
     assert "cw-ctx-stale" not in context_html(clean, files, "abcdef1234567")
     assert "cw-ctx-stale" not in context_html(clean, files, "")
+
+
+def test_all_symbols_sits_inside_the_system_change_section_under_the_legend():
+    out = pics({"pr": None, "groups": {}, "overview": OV}, symdelta=GRAPH_SD)
+
+    start = out.index('<section class="cw-overview"')
+    section = out[start:out.index("</section>", start)]
+    assert section.index("cw-ov-legend") < section.index(ALL_SYMS)
+    assert out.count(ALL_SYMS) == 1
+
+
+def test_resolved_thread_without_resolution_posts_to_resolve_thread_and_listens_for_its_event():
+    tpl = _real_template()
+
+    assert "How was this resolved?" in tpl
+    assert "'/resolve-thread'" in tpl and "JSON.stringify({thread_id:root.gh_thread_id})" in tpl
+    assert "addEventListener('thread_resolution'" in tpl and "__cwOnThreadResolution" in tpl
+    assert "b.status==='done'" in tpl and ".catch(()=>fail(null))" in tpl and "es.addEventListener('open'" in tpl and "__cwResetHow" in tpl and "r.status===409" in tpl and "r.status===404" in tpl

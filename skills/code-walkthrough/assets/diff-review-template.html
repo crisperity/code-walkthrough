@@ -627,6 +627,14 @@
     color:var(--muted);overflow-wrap:anywhere}
 
   /* Same dialog idiom as #hr-comments, just a touch wider for a diff hunk's line length. */
+  .hr-how{margin:8px 0 0;font-size:var(--fs-sm);color:var(--muted)}
+  .hr-how-bar{position:relative;overflow:hidden;display:inline-block;width:120px;height:8px;
+    margin-right:8px;vertical-align:middle;border-radius:4px;background:var(--border)}
+  .hr-how-bar::after{content:"";position:absolute;inset:0;transform:translateX(-100%);
+    background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--text) 14%,transparent),transparent)}
+  @media (prefers-reduced-motion:no-preference){.hr-how-bar::after{animation:cw-shimmer 1.6s linear infinite}}
+  .hr-how-tags{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:6px}
+  .hr-how-err{color:var(--red);margin:0 0 6px}
   #hr-resolution{width:min(640px,92vw);max-height:82vh;padding:0;background:var(--panel);
     border:1px solid var(--border);border-radius:10px;color:var(--text)}
   #hr-resolution::backdrop{background:rgba(0,0,0,.6)}
@@ -654,9 +662,12 @@
   details.hunk.cw-previewing .cw-skel{display:none}
   .cw-skel>h2{margin:0 0 6px}
   .cw-skel>p{margin:0}
-  .cw-skel::after{content:"";position:absolute;inset:0;transform:translateX(-100%);
+  .cw-skel::after,.cw-skel-line::after{content:"";position:absolute;inset:0;transform:translateX(-100%);
     background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--text) 8%,transparent),transparent)}
-  @media (prefers-reduced-motion:no-preference){.cw-skel::after{animation:cw-shimmer 1.6s linear infinite}}
+  .cw-skel-line{position:relative;overflow:hidden;display:block;height:1em;margin:6px 0;border-radius:4px;
+    background:color-mix(in srgb,var(--text) 8%,transparent)}
+  .fact>.cw-skel-line{width:min(32ch,60%);margin:0}
+  @media (prefers-reduced-motion:no-preference){.cw-skel::after,.cw-skel-line::after{animation:cw-shimmer 1.6s linear infinite}}
   @keyframes cw-shimmer{to{transform:translateX(100%)}}
   #hr-comments-btn{display:inline-flex;align-items:center;gap:8px;height:38px;padding:0 14px;white-space:nowrap;
     background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:999px;
@@ -1185,8 +1196,6 @@
   .cw-ctx-bar{display:flex;gap:2px;width:120px;height:6px;border-radius:999px;overflow:hidden}
   .cw-ctx-bar i{display:block}
   .cw-ctx-bar .ok{background:var(--green)}.cw-ctx-bar .pt{background:var(--yellow)}.cw-ctx-bar .no{background:var(--red)}
-  .cw-ctx-gap{margin:0 0 6px;padding:2px 0 2px 10px;border-left:2px solid var(--yellow);line-height:1.45}
-  .cw-ctx-gap:last-child{margin-bottom:0}
   .cw-ctx-stale,.cw-ctx-empty,.cw-ctx-msg{color:var(--muted);font-size:var(--fs-xs)}
   .cw-ctx-stale{margin:6px 2px 0}
   .cw-ctx-link{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
@@ -3016,6 +3025,83 @@
     return chip;
   }
 
+  const howByRoot=new Map();
+  function paintHow(root,entry){
+    const el=entry.el; el.textContent='';
+    if(entry.status==='running'){
+      const bar=document.createElement('span'); bar.className='hr-how-bar'; bar.setAttribute('aria-hidden','true');
+      el.setAttribute('role','status');
+      el.append(bar,document.createTextNode('Analysing...'));
+      return;
+    }
+    el.removeAttribute('role');
+    if(entry.status==='done'){
+      const res=entry.res||{};
+      const tags=document.createElement('div'); tags.className='hr-how-tags';
+      const outcome=document.createElement('span'); outcome.className='chip chip-fix'; outcome.textContent=res.outcome||'none';
+      tags.appendChild(outcome);
+      if(res.confidence){
+        const conf=document.createElement('span'); conf.className='chip'+(res.confidence==='low'?' chip-guess':'');
+        conf.textContent=res.confidence+' confidence'; tags.appendChild(conf);
+      }
+      (res.commits||[]).forEach(sha=>{
+        const a=document.createElement('a'); a.className='linklike';
+        a.href='https://github.com/'+state.meta.repo+'/commit/'+sha;
+        a.target='_blank'; a.rel='noopener noreferrer'; a.textContent=sha.slice(0,7);
+        tags.appendChild(a);
+      });
+      const toggle=document.createElement('button'); toggle.type='button'; toggle.className='fb-ghost';
+      toggle.textContent=entry.collapsed?'Expand':'Collapse';
+      toggle.addEventListener('click',()=>{ entry.collapsed=!entry.collapsed; paintHow(root,entry); });
+      tags.appendChild(toggle);
+      el.appendChild(tags);
+      const text=res.closing_message||res.why;
+      if(text&&!entry.collapsed){
+        const p=document.createElement('p'); p.className='hr-resolution-text'; p.textContent=text;
+        el.appendChild(p);
+      }
+      return;
+    }
+    if(entry.status==='failed'){
+      const err=document.createElement('p'); err.className='hr-how-err';
+      err.textContent=entry.error||'Could not analyse this thread. Try again.'; el.appendChild(err);
+    }
+    const btn=document.createElement('button'); btn.type='button'; btn.className='fb-primary';
+    btn.textContent='How was this resolved?';
+    btn.addEventListener('click',()=>{
+      entry.status='running'; paintHow(root,entry);
+      const fail=msg=>{ entry.status='failed'; entry.error=msg; paintHow(root,entry); };
+      fetch(window.CW_LIVE.api+'/resolve-thread',{method:'POST',
+        headers:{'X-CW-Token':window.CW_LIVE.token,'Content-Type':'application/json'},
+        body:JSON.stringify({thread_id:root.gh_thread_id})})
+        .then(r=>{ if(r.ok) return r.json().then(b=>{ if(b&&b.status==='done'&&window.__cwOnThreadResolution) window.__cwOnThreadResolution({thread_id:root.gh_thread_id,status:'done',resolution:b.resolution}); });
+          fail(r.status===409?'The walkthrough is still building. Try again in a moment.'
+          :r.status===404?'This thread is no longer on the PR. Reload the page.':null); }).catch(()=>fail(null));
+    });
+    el.appendChild(btn);
+  }
+  function howBoxFor(root){
+    if(!window.CW_LIVE||!root.gh_thread_id||!root.resolved) return null;
+    let entry=howByRoot.get(root.id);
+    if(!entry){
+      if(state.resolutions&&state.resolutions[root.gh_thread_id]) return null;
+      entry={status:'idle',el:document.createElement('div')}; entry.el.className='hr-how';
+      howByRoot.set(root.id,entry); paintHow(root,entry);
+    }
+    return entry.el;
+  }
+  window.__cwOnThreadResolution=ev=>{
+    if(!ev||!ev.thread_id) return;
+    const root=state.notes.find(n=>n.gh_thread_id===ev.thread_id&&!n.reply_to&&!n.in_reply_to);
+    const entry=root&&howByRoot.get(root.id);
+    if(!entry) return;
+    entry.status=ev.status; entry.res=ev.resolution; entry.error=ev.error; paintHow(root,entry);
+  };
+  window.__cwResetHow=()=>howByRoot.forEach((entry,id)=>{
+    if(entry.status!=='running') return;
+    entry.status='idle'; paintHow(state.notes.find(n=>n.id===id),entry);
+  });
+
   // Same collapsed-<details> idiom as the .hr-lo fold below: cache the element per root id,
   // never tear it down while focus is inside (the comments panel's click-to-focus jump can
   // land a row here), and reconcile its children in place otherwise.
@@ -3038,7 +3124,8 @@
     ));
     const chip=buildResolutionChip(root);
     if(chip) summary.appendChild(chip);
-    placeIn(entry.el,[summary,...rows]);
+    const how=howBoxFor(root);
+    placeIn(entry.el,[summary,...rows,...(how?[how]:[])]);
     return entry.el;
   }
 
@@ -6589,6 +6676,10 @@ document.querySelectorAll('form.cw-ctx-link').forEach(wireCtxLink);
         const hook=window['__cwOn'+name[0].toUpperCase()+name.slice(1)];
         if(hook) hook(JSON.parse(e.data));
       });
+    });
+    es.addEventListener('open',()=>{ if(window.__cwResetHow) window.__cwResetHow(); });
+    es.addEventListener('thread_resolution',e=>{
+      if(window.__cwOnThreadResolution) window.__cwOnThreadResolution(JSON.parse(e.data));
     });
     es.addEventListener('posted',e=>{
       if(window.__cwOnPosted) window.__cwOnPosted(JSON.parse(e.data));
