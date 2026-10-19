@@ -1050,6 +1050,93 @@ def test_triage_guards_and_409s():
             assert status == 409 and body["error"] == cw_server.STILL_BUILDING_MSG, body
 
 
+def _resolve_thread_setup(home, resolutions=None):
+    d, _ = _make_walkthrough(home)
+    cw_store.write_json(d / "threads.json", {"threads": [{"thread_id": "T1", "first_comment_at": "2000-01-01T00:00:00Z"}]})
+    cw_store.write_json(d / "state.json", {"meta": {"pr": 7}, "notes": [], "resolutions": resolutions or {}})
+    return d
+
+
+def test_resolve_thread_guards_409_and_404():
+    with cw_testlib.temp_home() as home:
+        _resolve_thread_setup(home)
+        path = f"/api/walkthrough/{KEY}/{WID}/resolve-thread"
+        with running_daemon() as daemon:
+            assert _request(daemon, "POST", path, body="{}")[0] == 403
+            assert _post(daemon, path, {"thread_id": 5})[0] == 400
+            status, body = _post(daemon, path, {"thread_id": "nope"})
+            assert status == 404 and body["error"] == "thread not found", body
+            daemon.is_running = lambda _d: True
+            status, body = _post(daemon, path, {"thread_id": "T1"})
+            assert status == 409 and body["error"] == cw_server.STILL_BUILDING_MSG, body
+
+
+def test_resolve_thread_applied_resolution_is_done_at_once_without_a_worker_and_rerenders(monkeypatch):
+    with cw_testlib.temp_home() as home:
+        _resolve_thread_setup(home, {"T1": {"thread_id": "T1", "outcome": "none"}})
+        monkeypatch.setattr(cw_server.cw_run, "resolve_one_thread",
+                            lambda *a, **k: (_ for _ in ()).throw(AssertionError("worker ran")))
+        monkeypatch.setattr(cw_server._Handler, "_render_page", lambda self, d, meta, key, wid: ({"rev": 9}, None))
+        with running_daemon() as daemon:
+            sock = _sse_connect(daemon, KEY, WID)
+            try:
+                _sse_read_until(sock, b"event: snapshot")
+                status, body = _post(daemon, f"/api/walkthrough/{KEY}/{WID}/resolve-thread", {"thread_id": "T1"})
+                assert status == 200 and body["status"] == "done" and body["resolution"]["outcome"] == "none", body
+                buf = _sse_read_until(sock, b"event: rebuilt").decode()
+            finally:
+                sock.close()
+        assert buf.index('"status": "done"') < buf.index("event: rebuilt")
+
+
+def test_resolve_thread_runs_worker_in_background_emits_events_and_rerenders(monkeypatch):
+    resolution = {"thread_id": "T1", "outcome": "commits"}
+    with cw_testlib.temp_home() as home:
+        _resolve_thread_setup(home)
+        monkeypatch.setattr(cw_server.cw_run, "resolve_one_thread", lambda *a, **k: resolution)
+        monkeypatch.setattr(cw_server._Handler, "_render_page", lambda self, d, meta, key, wid: ({"rev": 9}, None))
+        with running_daemon() as daemon:
+            sock = _sse_connect(daemon, KEY, WID)
+            try:
+                _sse_read_until(sock, b"event: snapshot")
+                status, body = _post(daemon, f"/api/walkthrough/{KEY}/{WID}/resolve-thread", {"thread_id": "T1"})
+                assert status == 202 and body["status"] == "running", body
+                buf = _sse_read_until(sock, b"event: rebuilt").decode()
+            finally:
+                sock.close()
+        assert buf.index('"status": "running"') < buf.index('"status": "done"') < buf.index("event: rebuilt")
+        assert "event: thread_resolution" in buf and '"outcome": "commits"' in buf
+
+
+def _resolve_thread_failure(monkeypatch, resolve, render):
+    with cw_testlib.temp_home() as home:
+        _resolve_thread_setup(home)
+        monkeypatch.setattr(cw_server.cw_run, "resolve_one_thread", resolve)
+        monkeypatch.setattr(cw_server._Handler, "_render_page", render)
+        with running_daemon() as daemon:
+            sock = _sse_connect(daemon, KEY, WID)
+            try:
+                _sse_read_until(sock, b"event: snapshot")
+                assert _post(daemon, f"/api/walkthrough/{KEY}/{WID}/resolve-thread", {"thread_id": "T1"})[0] == 202
+                return _sse_read_until(sock, b'"status": "failed"').decode()
+            finally:
+                sock.close()
+
+
+def test_resolve_thread_worker_error_is_sent_as_a_failed_event_with_the_message(monkeypatch):
+    def boom(*a, **k):
+        raise cw_store.CWError("model said no")
+
+    buf = _resolve_thread_failure(monkeypatch, boom, lambda *a: ({"rev": 1}, None))
+    assert '"error": "model said no"' in buf and "event: rebuilt" not in buf
+
+
+def test_resolve_thread_render_failure_is_failed_not_done(monkeypatch):
+    buf = _resolve_thread_failure(monkeypatch, lambda *a, **k: {"thread_id": "T1"},
+                                  lambda self, d, meta, key, wid: (None, "gate rejected"))
+    assert "page re-render failed: gate rejected" in buf and '"status": "done"' not in buf
+
+
 def test_notes_put_works_while_idle_and_waits_for_the_walkthrough_lock():
     with cw_testlib.temp_home() as home:
         d, _ = _make_walkthrough(home)

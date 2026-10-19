@@ -220,6 +220,8 @@ def _style(v):
             raise _Bad(f"malformed declaration {d.strip()[:30]!r}")
         if prop not in _PROP_EXACT and not _PROP_FAMILY.fullmatch(prop):
             raise _Bad(f"CSS property {prop[:30]!r} is not allowed")
+        if prop == "border-collapse" and val.strip().lower() in ("collapse", "separate"):
+            continue
         out.append(f"{prop}: {_css_value(prop, val)}")
     return "; ".join(out)
 
@@ -615,13 +617,18 @@ def check_overview(raw, n_groups, files=None, symdelta=None, added_removed_text=
         for j, ref in enumerate(listof(f"{label}.refs", v, 3)):
             where = f"{label}.refs[{j}]"
             path, _, sym = ref.partition(":") if isinstance(ref, str) else ("", "", "")
-            if not path or (sym and not _SYMBOL.fullmatch(sym)):
+            if not path:
                 problems.append(f"{where}: expected path or path:symbol")
                 continue
-            if files is not None and not _ref_in_diff(path, sym, files, labels, texts):
-                problems.append(f"{where}: {ref[:80]} not in diff")
-                continue
-            out.append(ref)
+            if not _SYMBOL.fullmatch(sym):
+                sym = ""
+            if files is not None:
+                if not _ref_in_diff(path, "", files, labels, texts):
+                    problems.append(f"{where}: {ref[:80]} not in diff")
+                    continue
+                if not _ref_in_diff(path, sym, files, labels, texts):
+                    sym = ""
+            out.append(f"{path}:{sym}" if sym else path)
         return out
 
     def group_of(label, g):
@@ -673,7 +680,9 @@ def check_overview(raw, n_groups, files=None, symdelta=None, added_removed_text=
             problems.append(f"{label}: expected an object")
             continue
         a, b = e.get("from"), e.get("to")
-        if not (isinstance(a, str) and isinstance(b, str) and a in ids and b in ids and a != b):
+        if isinstance(a, str) and a == b and a in ids:
+            continue
+        if not (isinstance(a, str) and isinstance(b, str) and a in ids and b in ids):
             problems.append(f"{label}: from/to must be two different node ids, dropped")
             continue
         lab = text(f"{label}.label", e.get("label"), 0, 14) if e.get("label") not in (None, "") else ""

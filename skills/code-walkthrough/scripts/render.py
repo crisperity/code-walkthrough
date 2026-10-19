@@ -236,7 +236,7 @@ def overview_svg(ov, target_of=lambda item: "", mid=""):
     return "".join(parts)
 
 
-def overview_html(ov, explain, target_of=lambda item: ""):
+def overview_html(ov, explain, target_of=lambda item: "", symbols=""):
     """The whole System change section: heading, title as subtitle, diagram, legend, note chips."""
     heading = "How it works" if explain else "System change"
     present = [k for k in _OV_KEYS if any(x["kind"] == k for x in ov["nodes"] + ov["edges"] + ov["notes"])]
@@ -250,7 +250,7 @@ def overview_html(ov, explain, target_of=lambda item: ""):
             f'<p class="cw-ov-sub">{escape(ov["title"])}</p>'
             f'<div class="cw-vis cw-ov-wrap">{overview_svg(ov, target_of)}</div>'
             f'<div class="cw-ov-meta"><div class="cw-ov-legend">{legend}</div>'
-            f'<div class="cw-ov-chips">{chips}</div></div></section>')
+            f'<div class="cw-ov-chips">{chips}</div></div>{symbols}</section>')
 
 
 _CTX_SOURCES = ("jira", "github", "linear", "other")
@@ -271,7 +271,7 @@ def clean_context(raw):
     if not isinstance(raw, dict):
         return None, ["context: not an object"]
     problems = []
-    clean = {"ticket": None, "head_sha": "", "purpose": _ctx_text(raw.get("purpose"), 400), "items": [], "gaps": []}
+    clean = {"ticket": None, "head_sha": "", "purpose": _ctx_text(raw.get("purpose"), 400), "items": []}
     t = raw.get("ticket")
     if isinstance(t, dict):
         key, source = _ctx_text(t.get("key"), 40), t.get("source")
@@ -303,9 +303,7 @@ def clean_context(raw):
             ref = None
         clean["items"].append({"status": item["status"], "text": text, "ref": ref,
                                "note": _ctx_text(item.get("note"), 200)})
-    gaps = raw.get("gaps") if isinstance(raw.get("gaps"), list) else []
-    clean["gaps"] = [g for g in (_ctx_text(g, 200) for g in gaps[:8]) if g]
-    if not (clean["ticket"] or clean["purpose"] or clean["items"] or clean["gaps"]):
+    if not (clean["ticket"] or clean["purpose"] or clean["items"]):
         return None, problems + ["context: nothing usable, ignored"]
     return clean, problems
 
@@ -328,10 +326,15 @@ def _ctx_ref(ref, files):
     return '<span class="cw-ctx-ev cw-ctx-none">not in diff</span>'
 
 
-def context_html(ctx, files, current_head=""):
+def context_html(ctx, files, current_head="", building=False):
     """The Context card, or the empty-state form when there is no ticket context. `files` is the
     parsed diff (a ref links only when its path is in it); `current_head` is the page's head sha,
-    compared with the one the comparison was made against."""
+    compared with the one the comparison was made against. While `building`, a missing context is
+    a skeleton, since the ticket may still turn up."""
+    if not ctx and building:
+        return ('<section class="cw-context" id="cw-context" aria-labelledby="cw-context-h">'
+                '<h2 id="cw-context-h">Context</h2><span class="cw-skel-line" aria-busy="true"></span>'
+                '<span class="cw-skel-line" aria-busy="true"></span></section>')
     if not ctx:
         return ('<section class="cw-context" id="cw-context" aria-labelledby="cw-context-h">'
                 '<h2 id="cw-context-h">Context</h2><form class="cw-ctx-link">'
@@ -369,9 +372,6 @@ def context_html(ctx, files, current_head=""):
             + f'</span>{_ctx_ref(i.get("ref"), files)}</li>' for i in items)
         secs.append('<div class="cw-ctx-sec"><div class="cw-ctx-label"><span>Asked for vs. this diff</span>'
                     f'<span class="cw-ctx-bar" aria-hidden="true">{bar}</span></div><ul class="cw-ctx-items">{rows}</ul></div>')
-    if ctx.get("gaps"):
-        secs.append('<div class="cw-ctx-sec"><div class="cw-ctx-label">Gaps and questions</div>'
-                    + "".join(f'<p class="cw-ctx-gap">{_html_prose(g)}</p>' for g in ctx["gaps"]) + "</div>")
     seen, now = ctx.get("head_sha") or "", current_head or ""
     stale = ""
     if seen and now and not (seen.startswith(now) or now.startswith(seen)):
@@ -382,7 +382,7 @@ def context_html(ctx, files, current_head=""):
 
 def render_html(analysis, files, template, walkthrough="", links=None, title=None,
                 now=None, complexity=None, state=None, explain=False, order=None,
-                symdelta=None, visuals=None, context=None):
+                symdelta=None, visuals=None, context=None, building=False):
     target = analysis.get("target") or ""
     count, added, removed, net = counts_from(files)
     sign = "+" if net >= 0 else ""
@@ -407,13 +407,15 @@ def render_html(analysis, files, template, walkthrough="", links=None, title=Non
     if cx:
         body.append(f'  <div class="fact"><b>Complexity</b><span>{_html_prose(cx)}</span></div>')
     verdict = analysis.get("verdict") or ""
+    label = "Summary" if explain else "Verdict"
     if verdict:
-        label = "Summary" if explain else "Verdict"
         body.append(f'  <div class="fact"><b>{label}</b><span>{_html_prose(verdict)}</span></div>')
+    elif building:
+        body.append(f'  <div class="fact"><b>{label}</b><span class="cw-skel-line" aria-busy="true"></span></div>')
     body.append("</div>")
 
     if not explain:
-        body.append(context_html(context, files, (links or {}).get("head_sha", "")))
+        body.append(context_html(context, files, (links or {}).get("head_sha", ""), building))
 
     overview = _paragraphs(analysis.get("overview"))
     if overview:
@@ -422,6 +424,11 @@ def render_html(analysis, files, template, walkthrough="", links=None, title=Non
         # used to swap between said nothing the field itself didn't already carry.
         body.append("<h2>Overview</h2>")
         body += [_block_html(block) for block in overview]
+
+    all_symbols = render_symbols(symdelta, explain, paths=order if explain else (), inline=True) \
+        if symdelta else ""
+    symbols_block = ('<details class="cw-allsyms"><summary>All symbols</summary>'
+                     f'{all_symbols.rstrip(chr(10))}</details>') if all_symbols else ""
 
     clean = visuals or {}
     pr_picture = clean.get("pr")
@@ -434,13 +441,15 @@ def render_html(analysis, files, template, walkthrough="", links=None, title=Non
             refs = item.get("refs") or []
             return refs[0].partition(":")[0] if refs else group_file.get(item.get("group"), "")
 
-        body.append(overview_html(ov, explain, target_of))
+        body.append(overview_html(ov, explain, target_of, symbols_block))
     elif pr_picture:
         pic_heading = "This code in one picture" if explain else "The PR in one picture"
         body.append('<section class="cw-pr-picture" id="cw-pr-picture"'
                     f' aria-labelledby="cw-pr-picture-h"><h2 id="cw-pr-picture-h">{escape(pic_heading)}</h2>'
                     f'<div class="cw-vis" role="group" aria-label="{escape(pr_picture["title"])}">'
-                    f'{pr_picture["html"]}</div></section>')
+                    f'{pr_picture["html"]}</div>{symbols_block}</section>')
+    elif symbols_block:
+        body.append(symbols_block)
 
     if walkthrough.strip():
         body.append('<h2 class="h2-row"><span>Walkthrough</span><span class="ctl" id="wt-ctl"></span></h2>')
@@ -451,12 +460,6 @@ def render_html(analysis, files, template, walkthrough="", links=None, title=Non
             return f'<div class="cw-vis cw-vis-group">{html}</div>' if html else ""
 
         body.append(PICTURE_MARKER.sub(picture, walkthrough.rstrip("\n")))
-
-    all_symbols = render_symbols(symdelta, explain, paths=order if explain else (), inline=True) \
-        if symdelta else ""
-    if all_symbols:
-        body.append('<details class="cw-allsyms"><summary>All symbols</summary>'
-                    f'{all_symbols.rstrip(chr(10))}</details>')
 
     stamp = (now or datetime.now()).strftime("%Y-%m-%d %H:%M")
     foot = f"{escape(target)} · generated {stamp}"
@@ -517,6 +520,8 @@ def main():
     parser.add_argument("--template", required=True, help="the page template")
     parser.add_argument("--state", help="state.json, inlined behind HR_STATE")
     parser.add_argument("--title")
+    parser.add_argument("--building", action="store_true",
+                        help="the page is a partial render: Verdict and Context show skeletons, not empty states")
     parser.add_argument("--explain", action="store_true",
                         help="the target is code as it stands, not a change: reword the headings "
                              "and drop the add/remove arithmetic the empty baseline makes empty")
@@ -547,7 +552,7 @@ def main():
         analysis, files, _read(args.template),
         _read(args.walkthrough), links, args.title,
         complexity=complexity, state=state, explain=args.explain, order=order,
-        symdelta=symdelta, visuals=clean, context=context,
+        symdelta=symdelta, visuals=clean, context=context, building=args.building,
     ))
     return 0
 

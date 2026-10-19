@@ -7,6 +7,7 @@ import contextlib
 import io
 import json
 import sys
+import subprocess
 import tempfile
 import threading
 import types
@@ -231,6 +232,32 @@ def test_thread_worker_need_diffs_for_sends_diffs_in_second_prompt():
         assert all(Path(e["cwd"]).resolve() == (d / "head").resolve() for e in fc.log())
 
 
+def test_thread_worker_accepts_need_diffs_for_as_a_json_encoded_string():
+    cw_testlib.require_posix()
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp) / "work"
+        d.mkdir()
+        (d / "head").mkdir()
+        seed = {
+            "thread_id": "t1", "thread": {"thread_id": "t1"},
+            "commits": [{"sha": "abc123", "committed_at": "2024-01-01T00:00:00Z"}], "diffs": {},
+            "cache_path_positive": str(d / "cache" / "positive.json"),
+            "cache_path_null": str(d / "cache" / "null.json"),
+        }
+        resolution = {
+            "thread_id": "t1", "outcome": "none", "closing_message": "", "ticket": None,
+            "commits": [], "files": [], "why": "no code change needed", "confidence": "high",
+        }
+        with cw_testlib.fake_claude(tmp, {"sonnet": [
+            cw_testlib.claude_result(structured={"thread_id": "t1", "need_diffs_for": '["abc123"]'}),
+            cw_testlib.claude_result(structured=resolution),
+        ]}) as fc:
+            config = _config(profiles={"a": {"kind": "claude-code", "model": "sonnet"}}, roles={"analysis": "a"})
+            result = cw_run._thread_worker(d, 1, seed, {"abc123": "diff --git a/foo.py b/foo.py\n"}, config)
+        assert result == resolution
+        assert "Diffs:" in fc.log()[-1]["stdin"]
+
+
 # ---------------------------------------------------------------------------
 # small-diff route
 # ---------------------------------------------------------------------------
@@ -315,12 +342,12 @@ def test_visuals_pass_returns_overview_problems_and_writes_overview():
     with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
         with cw_testlib.StubLLM({}) as stub:
             d, meta = _visuals_dir(home, tmp, stub)
-            bad = {"overview": _overview("foo.py:not_there"), "groups": []}
+            bad = {"overview": _overview("bar.py:not_there"), "groups": []}
             good = {"overview": _overview("foo.py:X"), "groups": []}
             stub.script = {"prose-m": [_submit(bad), _submit(good)]}
             assert cw_run._run_visuals(d, meta, cw_store.load_config(), None)
             gate = [m["content"] for m in stub.requests[1]["messages"] if m.get("role") == "tool"][-1]
-            assert gate.startswith("gate:") and "overview.nodes[1].refs[0]: foo.py:not_there not in diff" in gate
+            assert gate.startswith("gate:") and "overview.nodes[1].refs[0]: bar.py:not_there not in diff" in gate
             saved = json.loads((d / "visuals.json").read_text())
             assert saved["overview"]["title"] == "Foo changes" and len(saved["overview"]["nodes"]) == 2
             assert saved["groups"] == [] and saved["pr"] is None
@@ -745,3 +772,45 @@ def test_full_clean_keeps_context_json():
         (d / "analysis.json").write_text("{}")
         cw_run._full_clean(d, {}, d)
         assert (d / "context.json").exists() and not (d / "analysis.json").exists()
+
+
+def test_render_partial_forwards_the_pr_title(monkeypatch):
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(cw_run.subprocess, "run", fake_run)
+    monkeypatch.setattr(cw_run.cw_store, "update_meta", lambda d, f: None)
+    meta = {"repo": "r", "base": "b", "head": "h", "target": "t", "title": "Fix the widget"}
+    cw_run.render_partial(Path("/x"), meta)
+    assert seen["cmd"][-2:] == ["--title", "Fix the widget"]
+    cw_run.render_partial(Path("/x"), {k: v for k, v in meta.items() if k != "title"})
+    assert "--title" not in seen["cmd"]
+
+
+def test_run_joins_the_visuals_thread_when_the_run_raises(monkeypatch):
+    done = threading.Event()
+
+    def slow_visuals(*a, **k):
+        threading.Event().wait(0.3)
+        done.set()
+        return False
+
+    monkeypatch.setattr(cw_run, "_run_visuals", slow_visuals)
+    monkeypatch.setattr(cw_run, "_final_build", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
+        repo, base, head = cw_testlib.make_repo(tmp, {"foo.py": "a\nb\nc\n"}, {"foo.py": "a\nX\nc\n"})
+        with cw_testlib.StubLLM({}) as stub:
+            cw_testlib.write_config(home, {"p": stub.profile("prose-m")}, {"analysis": "p", "prose": "p"},
+                                    small_diff_lines=1000000, batch_max_lines=1)
+            d, meta, _reused = cw_run.prepare_walkthrough({
+                "repo": str(repo), "base": base, "head": head, "target": "main...HEAD", "slug": "t"})
+            seed = json.loads((d / "batches" / "fragment-1.seed.json").read_text())
+            files = [{"path": f["path"], "role": "r",
+                      "hunks": [{"header": h["header"], "note": "n"} for h in f["hunks"]]} for f in seed["files"]]
+            stub.script = {"prose-m": [cw_testlib.tool_call("submit_analysis", {
+                "files": files, "overview": "o", "verdict": "v"})]}
+            assert cw_run.run(d) == "failed"
+        assert done.is_set()

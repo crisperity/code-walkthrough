@@ -479,6 +479,8 @@ def render_partial(d, meta):
         args += ["--paths", *meta["paths"]]
     if meta.get("explain"):
         args.append("--explain")
+    if meta.get("title"):
+        args += ["--title", meta["title"]]
     result = subprocess.run(
         [sys.executable, str(SCRIPTS_DIR / "pipeline.py"), *args],
         capture_output=True, text=True, timeout=300,
@@ -879,10 +881,10 @@ def _write_model_symdelta(d, meta, symdelta, calls):
     new = [(*c["from"].split(":", 1), *c["to"].split(":", 1)) for c in calls if c["state"] == "new"]
     gone = [(*c["from"].split(":", 1), *c["to"].split(":", 1)) for c in calls if c["state"] == "gone"]
     nodes, edges, presets, counts = symdelta_mod.build_graph(new, gone)
-    (d / "symdelta.model.json").write_text(json.dumps({
+    cw_store.write_json(d / "symdelta.model.json", {
         "target": meta["target"], "language": "model", "resolver": "model",
         "reason": symdelta.get("reason"), "nodes": nodes, "edges": edges, "moved": [],
-        "presets": presets, "counts": counts}, indent=2))
+        "presets": presets, "counts": counts})
 
 
 def _visuals_user_text(d, meta, analysis, symdelta, need_calls=False):
@@ -970,15 +972,21 @@ def _run_visuals(d, meta, config, on_event, force=False):
             (d / "symdelta.model.json").unlink(missing_ok=True)
         if not clean["overview"] and not clean["pr"] and not clean["groups"]:
             raise RuntimeError("no usable pictures; dropped: " + "; ".join(state["problems"])[:500])
-        out.write_text(json.dumps({
+        cw_store.write_json(out, {
             "overview": clean["overview"],
             "pr": clean["pr"],
-            "groups": [{"index": i, "html": h} for i, h in sorted(clean["groups"].items())]}, indent=2))
+            "groups": [{"index": i, "html": h} for i, h in sorted(clean["groups"].items())]})
         _emit_step(d, on_event, "visuals", "ok")
         return True
     except Exception as e:
         _emit_step(d, on_event, "visuals", "failed", error=str(e), remedy=getattr(e, "remedy", None))
         return False
+
+
+def _start_visuals(d, meta, config, on_event):
+    t = threading.Thread(target=_run_visuals, args=(d, meta, config, on_event), daemon=True)
+    t.start()
+    return t
 
 
 def _route_and_finalize(d, meta, config, on_event, batch_count, manifest, other_lines):
@@ -1236,6 +1244,11 @@ def _submit_resolution_handler(d, n, thread_id, window_shas, diffs, seed, state_
     def handler(args):
         args = args if isinstance(args, dict) else {}
         need = args.get("need_diffs_for")
+        if isinstance(need, str):
+            try:
+                need = json.loads(need)
+            except ValueError:
+                need = None
         if isinstance(need, list) and need:
             if state_["asked"]:
                 return "diffs already supplied; answer with the resolution"
@@ -1306,22 +1319,11 @@ def _thread_worker(d, n, seed, diffs, config, on_event=None):
     return state_["result"]
 
 
-def _run_thread_worker_guarded(d, n, seed, diffs, config, on_event, results, lock):
-    try:
-        result = _thread_worker(d, n, seed, diffs, config, on_event)
-    except Exception as exc:
-        _emit_step(d, on_event, f"thread-{n}", "failed", error=str(exc))
-        result = None
-    with lock:
-        results[n] = result
-
-
 def _resolve_threads(d, meta, config, on_event=None):
-    """2g, references/resolved-threads.md: never raises -- a failure sets the "threads" step
-    failed with a remedy and _final_build still renders. Gates every candidate, cached or
-    fresh, before merging, and merges only the passing ones (phase 2 plan point 4): unlike
-    fanout_threads.merge's own default, a failing thread is dropped rather than failing the
-    whole step."""
+    """2g, references/resolved-threads.md, code only: never raises -- a failure sets the
+    "threads" step failed with a remedy and _final_build still renders. Applies each cached
+    resolution that passes _check_resolution; a failing one is skipped rather than failing the
+    step, and threads with no cached answer wait for resolve_one_thread."""
     _emit_step(d, on_event, "threads", "running")
     state_path = d / "state.json"
     payload_path = d / "raw-graphql.json"
@@ -1340,17 +1342,15 @@ def _resolve_threads(d, meta, config, on_event=None):
             return
 
         commits_path = d / "commit-index.json"
-        diffs_path = d / "diffs.json"
         index_result = subprocess.run(
             [sys.executable, str(SCRIPTS_DIR / "fanout_threads.py"), "index",
              "--repo", meta["repo"], "--base", meta["base"], "--head", meta["head"],
-             "--out-commits", str(commits_path), "--out-diffs", str(diffs_path)],
+             "--out-commits", str(commits_path), "--out-diffs", str(d / "diffs.json")],
             capture_output=True, text=True,
         )
         if index_result.returncode != 0:
             raise cw_store.CWError(index_result.stderr.strip()[-500:])
         commits = json.loads(commits_path.read_text())["commits"]
-        diffs = json.loads(diffs_path.read_text())
 
         cache_dir = d / "cache"
         cache_dir.mkdir(exist_ok=True)
@@ -1362,62 +1362,21 @@ def _resolve_threads(d, meta, config, on_event=None):
         )
         if regen_result.returncode != 0:
             raise cw_store.CWError(regen_result.stderr.strip()[-500:])
-        plan_path = d / "resolution-plan.json"
-        plan_path.write_text(regen_result.stdout)
+        plan = json.loads(regen_result.stdout)
+        (d / "resolution-plan.json").write_text(regen_result.stdout)
 
-        resolutions_dir = d / "resolutions"
-        shutil.rmtree(resolutions_dir, ignore_errors=True)
-        split_result = subprocess.run(
-            [sys.executable, str(SCRIPTS_DIR / "fanout_threads.py"), "split",
-             "--threads", str(threads_path), "--commits", str(commits_path),
-             "--plan", str(plan_path), "--diffs", str(diffs_path), "--out", str(resolutions_dir)],
-            capture_output=True, text=True,
-        )
-        if split_result.returncode != 0:
-            raise cw_store.CWError(split_result.stderr.strip()[-500:])
-        manifest = json.loads(split_result.stdout)
-
-        results, lock, worker_threads = {}, threading.Lock(), []
-        for n, entry in enumerate(manifest, 1):
-            if entry["mode"] == "cached":
-                continue
-            seed = json.loads(Path(entry["seed"]).read_text())
-            wt = threading.Thread(
-                target=_run_thread_worker_guarded,
-                args=(d, n, seed, diffs, config, on_event, results, lock),
-                daemon=True,
-            )
-            worker_threads.append(wt)
-            wt.start()
-        for wt in worker_threads:
-            wt.join()
-
-        threads_by_id = {t["thread_id"]: t for t in threads}
-        candidates = {}
-        for n, entry in enumerate(manifest, 1):
-            thread_id = entry["thread_id"]
-            if entry["mode"] == "cached":
-                candidates[thread_id] = entry["cache_path_hit"]
-            elif results.get(n) is not None:
-                candidates[thread_id] = str(d / "resolutions" / f"thread-{n}.json")
-
-        passing = []
-        for thread_id, path in candidates.items():
-            data = cw_store.read_json(path, default=None)
-            window_shas = {c["sha"] for c in fanout_threads.window_commits(
-                commits, threads_by_id[thread_id]["first_comment_at"])}
-            if not _check_resolution(thread_id, window_shas, data):
-                passing.append(thread_id)
-
-        passing_threads = [t for t in threads if t["thread_id"] in passing]
-        fragment_paths = [candidates[tid] for tid in passing]
-        try:
-            merged = fanout_threads.merge(passing_threads, commits, fragment_paths)
-        except RuntimeError as exc:
-            raise cw_store.CWError(str(exc))
+        entries = {e["thread_id"]: e for e in plan.get("resolution", [])}
+        resolutions = {}
+        for thread in threads:
+            thread_id = thread["thread_id"]
+            window = fanout_threads.window_commits(commits, thread["first_comment_at"])
+            path = _cached_path(entries.get(thread_id), window)
+            data = cw_store.read_json(path, default=None) if path else None
+            if path and not _check_resolution(thread_id, {c["sha"] for c in window}, data):
+                resolutions[thread_id] = data
 
         apply_result = _notes(meta, ["apply-resolutions", "--state", str(state_path)],
-                               stdin=json.dumps(merged["resolutions"]))
+                               stdin=json.dumps(resolutions))
         if apply_result.returncode != 0:
             raise cw_store.CWError(apply_result.stderr.strip()[-500:])
     except cw_store.CWError as e:
@@ -1425,6 +1384,63 @@ def _resolve_threads(d, meta, config, on_event=None):
         return
 
     _emit_step(d, on_event, "threads", "ok")
+
+
+def _cached_path(entry, window):
+    """The plan entry's cache_path_hit when a cached answer exists and is not stale, else None."""
+    if not entry or not entry.get("cached"):
+        return None
+    hit = cw_store.read_json(entry["cache_path_hit"], default=None)
+    if isinstance(hit, dict) and not fanout_threads._cache_is_stale(hit, window):
+        return entry["cache_path_hit"]
+    return None
+
+
+def applied_resolution(d, thread_id):
+    return ((cw_store.read_json(d / "state.json", default=None) or {}).get("resolutions") or {}).get(thread_id)
+
+
+def resolve_one_thread(d, meta, config, thread_id, on_event=None):
+    """2g for one resolved thread, on demand: a cached or already-applied answer is returned
+    without a model call, otherwise one worker runs. The gated resolution is applied to
+    state.json. Returns the resolution object; raises CWError when there is none."""
+    applied = applied_resolution(d, thread_id)
+    if applied is not None:
+        return applied
+    threads = cw_store.read_json(d / "threads.json", default={}).get("threads", [])
+    thread = next((t for t in threads if t["thread_id"] == thread_id), None)
+    if thread is None:
+        raise cw_store.CWError(f"unknown thread {thread_id}")
+    commits = (cw_store.read_json(d / "commit-index.json", default=None) or {}).get("commits")
+    diffs = cw_store.read_json(d / "diffs.json", default=None)
+    plan = cw_store.read_json(d / "resolution-plan.json", default=None) or {}
+    entry = next((e for e in plan.get("resolution", []) if e["thread_id"] == thread_id), None)
+    if commits is None or diffs is None or entry is None:
+        raise cw_store.CWError("thread data not built yet", remedy="re-run /code-walkthrough")
+    window = fanout_threads.window_commits(commits, thread["first_comment_at"])
+    path = _cached_path(entry, window)
+    if path is None:
+        seed, _ = fanout_threads.build_seed(thread, window, diffs, 400, entry)
+        token = hashlib.sha1(thread_id.encode()).hexdigest()[:8]
+        try:
+            result = _thread_worker(d, token, seed, diffs, config, on_event)
+            step = (cw_store.read_meta(d) or {}).get("steps", {}).get(f"thread-{token}") or {}
+        finally:
+            cw_store.update_meta(d, lambda m: m.get("steps", {}).pop(f"thread-{token}", None))
+        if result is None:
+            raise cw_store.CWError(step.get("error") or "the model returned no valid resolution",
+                                   remedy=step.get("remedy"))
+        path = str(d / "resolutions" / f"thread-{token}.json")
+    data = cw_store.read_json(path, default=None)
+    problems = _check_resolution(thread_id, {c["sha"] for c in window}, data)
+    if problems:
+        raise cw_store.CWError("; ".join(problems))
+    with cw_store.dir_lock(d):
+        result = _notes(meta, ["apply-resolutions", "--state", str(d / "state.json")],
+                        stdin=json.dumps({thread_id: data}))
+    if result.returncode != 0:
+        raise cw_store.CWError(result.stderr.strip()[-500:])
+    return data
 
 
 def _head_on_github(meta):
@@ -1767,6 +1783,7 @@ def run(d, on_event=None):
     on_event = on_event or (lambda ev, data: None)
     renderer = _PartialRenderer(d, on_event)
     _set_renderer(d, renderer)
+    visuals_thread = None
     try:
         config = cw_store.load_config()
         meta = cw_store.read_meta(d) or {}
@@ -1818,6 +1835,7 @@ def run(d, on_event=None):
             if not small_ok:
                 _fail_run_from_step(d, on_event, "small", "small route failed the fragment gate")
                 return "failed"
+            visuals_thread = _start_visuals(d, meta, config, on_event)
         else:
             results = {}
             lock = threading.Lock()
@@ -1856,10 +1874,11 @@ def run(d, on_event=None):
                 if not ok:
                     _fail_run(d, on_event, None, gate=lines)
                     return "failed"
+            visuals_thread = _start_visuals(d, meta, config, on_event)
 
         renderer.wait_idle(timeout=60)
+        visuals_thread.join()
         meta = cw_store.read_meta(d) or meta
-        _run_visuals(d, meta, config, on_event)
         final_ok = _final_build(d, meta, config, on_event)
         return "done" if final_ok else "failed"
     except Exception as e:
@@ -1868,6 +1887,8 @@ def run(d, on_event=None):
         _emit_step(d, on_event, "run", "failed", error=str(e), remedy=remedy)
         return "failed"
     finally:
+        if visuals_thread:
+            visuals_thread.join()
         with _RENDERERS_LOCK:
             _RENDERERS.pop(str(d), None)
 
