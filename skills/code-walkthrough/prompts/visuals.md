@@ -15,14 +15,14 @@ A reviewer sees in 10 seconds where the change is and what kind. The page draws 
      "notes": [{"kind": "new|changed|removed|guard|config|moved", "text": "1-48 chars",
                 "group": <index>|null, "refs": []}]}
 
-- 6 to 10 nodes, 6 KB in all; `notes` are chips for changes with no place in the graph. Nodes are runtime components or
-  concepts (Tool wrapper, Cost gate, Postgres), never function names. Edges run in the direction
-  of control or data; put the main flow first.
+- 6 to 10 nodes, 6 KB in all; `notes` are chips for changes with no place in the graph. Nodes are runtime
+  components or concepts (Tool wrapper, Cost gate, Postgres), never function names. Edges follow control or
+  data; main flow first.
 - `kind` marks what the change did. Show deleted things as `removed` nodes. `guard` is a trust
   boundary or validation that got stricter. `watch` on at most 3 nodes: look here first.
-- Every node and note needs a `group` index or `refs` copied from the digest or diff; a ref's path
-  must be in the diff and its symbol a digest symbol or an identifier on a +/- line, or the ref
-  is dropped (and a node with no anchor left with it).
+- Every node and note needs a `group` index or `refs`: a diff file path, optionally `path:symbol` with
+  the symbol from the digest or a +/- line. A path not in the diff drops the ref (and a node left with
+  no anchor).
 - No runtime path (refactor, move, deps)? Use 2+ modules or areas as `same` nodes with edges and
   put the change in notes. A docs- or config-only change: omit `overview`.
 
@@ -57,8 +57,8 @@ picture already carries the explanation, so a picture that reads like styled pro
   transitions and before/after; a table with the changed cell highlighted; bars scaled from real
   numbers; a timeline when order matters. Plain text cards are the last resort.
 - One idea per picture. Clarity beats coverage: leave out symbols and files that do not serve
-  that idea; nothing has to mention every file.
-- Real names and numbers only, copied from the data you were handed. Never invent a count, name or relationship.
+  that idea.
+- Real names and numbers only, copied from the data you were handed; never invent any.
 - Colour has meaning: `var(--success)` new, `var(--warning)` changed, `var(--destructive)`
   removed or blocked, `var(--accent)` the focus, `var(--muted-foreground)` untouched context.
 - Give a picture to EVERY group with real structure or behaviour to show (a flow, a data shape,

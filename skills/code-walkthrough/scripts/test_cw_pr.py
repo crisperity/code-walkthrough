@@ -14,6 +14,8 @@ import tempfile
 import threading
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent))
 import cw_run  # noqa: E402
 import cw_store  # noqa: E402
@@ -76,6 +78,9 @@ def test_order_prepare_comments_threads_render(monkeypatch):
                 {"repo": str(repo), "base": base, "head": head, "target": "t", "slug": "t", "pr": 7})
             events = []
             status = cw_run.run(d, lambda ev, data: events.append((ev, data)))
+            assert stub.count("analysis-m") == 0
+            assert "T1" not in (cw_store.read_json(d / "state.json").get("resolutions") or {})
+            assert cw_run.resolve_one_thread(d, cw_store.read_meta(d), cw_store.load_config(), "T1")["outcome"] == "conversation"
 
         assert status == "done"
         steps = _step_events(events)
@@ -155,6 +160,8 @@ def test_need_diffs_for_gives_diffs_then_resolves():
             d, meta, _reused = cw_run.prepare_walkthrough(
                 {"repo": str(repo), "base": base, "head": head, "target": "t", "slug": "t", "pr": 7})
             status = cw_run.run(d, lambda ev, data: None)
+            assert stub.count("analysis-m") == 0
+            assert cw_run.resolve_one_thread(d, cw_store.read_meta(d), cw_store.load_config(), "T1")["outcome"] == "commits"
 
         assert status == "done"
         assert stub.count("analysis-m") == 2
@@ -206,11 +213,39 @@ def test_bad_sha_or_javascript_ticket_dropped_from_merge():
             d, meta, _reused = cw_run.prepare_walkthrough(
                 {"repo": str(repo), "base": base, "head": head, "target": "t", "slug": "t", "pr": 7})
             status = cw_run.run(d, lambda ev, data: None)
+            args = (d, cw_store.read_meta(d), cw_store.load_config())
+            for t in "AB":
+                with pytest.raises(cw_store.CWError, match="no valid resolution"):
+                    cw_run.resolve_one_thread(*args, t)
+            assert cw_run.resolve_one_thread(*args, "C") == _valid_resolution("C")
+            assert not [k for k in cw_store.read_meta(d)["steps"] if k.startswith("thread-")]
 
         assert status == "done"
         state = json.loads((d / "state.json").read_text())
         assert list(state["resolutions"].keys()) == ["C"]
         assert counts == {"A": 3, "B": 3, "C": 1}
+
+
+def test_resolve_one_thread_applies_under_the_dir_lock(monkeypatch):
+    with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
+        repo, base, head = _pr_repo(tmp)
+        with cw_testlib.StubLLM(lambda body, _n: cw_testlib.small_route_reply(body)
+                                if body.get("model") == "prose-m"
+                                else cw_testlib.tool_call("submit_resolution", _valid_resolution("T1"))) as stub, \
+                cw_testlib.fake_gh(tmp, comments=[_comment(101)], threads=[_thread_node("T1", 101)]):
+            cw_testlib.write_route_config(home, stub, ask=False)
+            d, meta, _reused = cw_run.prepare_walkthrough(
+                {"repo": str(repo), "base": base, "head": head, "target": "t", "slug": "t", "pr": 7})
+            cw_run.run(d, lambda ev, data: None)
+            real, held = cw_run._notes, []
+
+            def spy(meta_, args, **kw):
+                held.append(cw_store.dir_lock(d).locked())
+                return real(meta_, args, **kw)
+
+            monkeypatch.setattr(cw_run, "_notes", spy)
+            cw_run.resolve_one_thread(d, cw_store.read_meta(d), cw_store.load_config(), "T1")
+        assert held == [True]
 
 
 # ---------------------------------------------------------------------------
@@ -235,16 +270,24 @@ def test_cache_hit_then_refresh_make_no_model_calls():
             d, meta, _reused = cw_run.prepare_walkthrough(params)
             status = cw_run.run(d, lambda ev, data: None)
             assert status == "done"
+            assert stub.count("analysis-m") == 0
+            assert cw_run.resolve_one_thread(d, cw_store.read_meta(d), cw_store.load_config(), "T1")["thread_id"] == "T1"
             assert any((d / "cache").glob("*.json"))
 
             analysis_n1 = stub.count("analysis-m")
+            assert cw_run.resolve_one_thread(d, cw_store.read_meta(d), cw_store.load_config(), "T1") is not None
+            assert stub.count("analysis-m") == analysis_n1
             prose_n1 = stub.count("prose-m")
 
             # Re-run the resolve step directly: everything is now cached, so this adds no
             # model calls at all.
             meta = cw_store.read_meta(d)
+            state = json.loads((d / "state.json").read_text())
+            del state["resolutions"]["T1"]
+            (d / "state.json").write_text(json.dumps(state))
             cw_run._resolve_threads(d, meta, cw_store.load_config(), None)
             assert stub.count("analysis-m") == analysis_n1
+            assert json.loads((d / "state.json").read_text())["resolutions"]["T1"]["thread_id"] == "T1"
 
             # Refresh path: a second walkthrough_start on a done PR goes to "building", and
             # run() takes the refresh short-circuit straight to _final_build -- no batch or

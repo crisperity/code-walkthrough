@@ -10,7 +10,7 @@ Usage:
   pipeline.py render --dir D --slug S [--title T]
   pipeline.py all --dir D --repo R --base B --head H --slug S [--title T] [--pr N]
       [--paths P ...] [--explain] [--prior] [--links-cached]
-  pipeline.py partial --dir D --repo R --base B --head H --target T [--paths P ...] [--explain]
+  pipeline.py partial --dir D --repo R --base B --head H --target T [--paths P ...] [--explain] [--title T]
 
 All three read raw.diff, analysis.json and, if present, symdelta.json from --dir. symdelta.py
 itself stays outside this driver: it runs alongside the fan-out, before this is invoked.
@@ -333,10 +333,12 @@ def cmd_partial(args):
                   "--format", "html",
                   "--template", str(SKILL_DIR / "assets" / "diff-review-template.html"),
                   "--walkthrough", str(partial_dir / "section-walkthrough.html"),
-                  "--state", str(state_path)]
+                  "--state", str(state_path), "--building"]
     render_cmd += _optional_data_flags(d)
     if args.explain:
         render_cmd.append("--explain")
+    if args.title:
+        render_cmd += ["--title", args.title]
 
     tmp_page = d / "partial.html.tmp"
     if not _run_to_file("render.py", render_cmd, tmp_page):
@@ -408,6 +410,7 @@ def build_parser():
     partial.add_argument("--target", required=True)
     partial.add_argument("--paths", nargs="*", default=[])
     partial.add_argument("--explain", action="store_true")
+    partial.add_argument("--title")
     partial.set_defaults(func=cmd_partial)
 
     return parser
