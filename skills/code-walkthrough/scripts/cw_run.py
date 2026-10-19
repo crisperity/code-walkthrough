@@ -324,7 +324,14 @@ def _resolution_submit_tool():
         "name": "submit_resolution",
         "description": "Submit this thread's resolution, or ask for the diffs it needs first.",
         "parameters": {"type": "object", "required": ["thread_id"],
-            "properties": {"thread_id": {"type": "string"}}, "additionalProperties": True}}}
+            "properties": {
+                "thread_id": {"type": "string"},
+                "need_diffs_for": {"type": "array", "items": {"type": "string"}},
+                "closing_message": {"type": ["string", "null"]},
+                "ticket": {"type": ["string", "null"]},
+                "commits": {"type": "array", "items": {"type": "string"}},
+                "files": {"type": "array", "items": {"type": "object"}}},
+            "additionalProperties": True}}}
 
 
 def _analysis_submit_tool():
@@ -1255,11 +1262,6 @@ def _submit_resolution_handler(d, n, thread_id, window_shas, diffs, seed, state_
     def handler(args):
         args = args if isinstance(args, dict) else {}
         need = args.get("need_diffs_for")
-        if isinstance(need, str):
-            try:
-                need = json.loads(need)
-            except ValueError:
-                need = None
         if isinstance(need, list) and need:
             if state_["asked"]:
                 return "diffs already supplied; answer with the resolution"
