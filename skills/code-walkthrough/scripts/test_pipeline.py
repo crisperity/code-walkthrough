@@ -449,6 +449,21 @@ def test_partial_builds_a_page_with_the_right_meta_id_and_touches_no_final_artif
         assert not list(d.glob("section-*.html"))
 
 
+def test_partial_title_becomes_the_page_heading():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo, base, head = _repo(tmp)
+        d = Path(tmp) / "work"
+        d.mkdir()
+        diff_text = cw_testlib.git(repo, "diff", f"{base}...{head}")
+        (d / "raw.diff").write_text(diff_text)
+        _batch_seed(d, HUNK_HEADER.search(diff_text).group(1))
+        rc = pipeline.main(["partial", "--dir", str(d), "--repo", str(repo), "--base", base,
+                             "--head", head, "--target", f"{base}...{head}", "--title", "Fix the widget"])
+        assert rc == 0
+        page = (d / "partial.html").read_text()
+        assert "Fix the widget" in page and "Code walkthrough:" not in page
+
+
 def test_partial_with_no_fragments_yet_still_builds_a_skeleton_page():
     with tempfile.TemporaryDirectory() as tmp:
         repo, base, head = _repo(tmp)

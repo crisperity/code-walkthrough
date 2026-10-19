@@ -22,12 +22,10 @@ Judge from the diff, not from the ticket's own claims of what was done.
 `ref` is a head-side `path:line` taken from a `+` line of the diff, the single best place to look
 for that item, or null when there is none. Never guess a line you did not see.
 
-`purpose` is one or two sentences on what the ticket is for, in your words. `gaps` are open
-questions a reviewer should ask: something the ticket leaves unsaid that the diff had to decide,
-an acceptance criterion the diff cannot show, a case it does not cover. Skip a gap you cannot
-tie to the ticket or the diff.
+`purpose` is one or two sentences on what the ticket is for, in your words. An item you cannot
+judge from the diff is a `partial` item whose `note` says what could not be checked.
 
-At most 12 items and 6 gaps, one line each. Mark identifiers with backticks. Record `head_sha`
+At most 12 items, one line each. Mark identifiers with backticks. Record `head_sha`
 exactly as handed. Copy `ticket` fields from the ticket text; leave out a field you cannot find
 rather than inventing it.
 
@@ -45,12 +43,11 @@ rather than inventing it.
     {"status": "missing", "text": "Document the new keys", "ref": null, "note": ""},
     {"status": "extra", "text": "Metrics moved to their own package", "ref": "pkg/metrics.py:1",
      "note": ""}
-  ],
-  "gaps": ["What should happen to in-flight requests when a limit drops?"]
+  ]
 }
 ```
 
 Limits the page enforces, so stay inside them: `source` is one of `jira`, `github`, `linear`,
 `other`; `found_in` is one of `branch`, `pr_body`, `commit`, `link`; `key` up to 40 characters,
-`title` 200, `status` 40, `purpose` 400, each item `text` and `note` 200, each gap 200. `url` is
+`title` 200, `status` 40, `purpose` 400, each item `text` and `note` 200. `url` is
 an `http(s)` link or left out. Anything outside these is dropped, not repaired.

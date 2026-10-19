@@ -64,8 +64,8 @@ arithmetic, a string from `analysis.json`, or a section file pasted byte for byt
 | Facts strip | `.facts` with up to three `.fact` blocks | file count and net delta from `raw.diff`, the target, `verdict` |
 | OVERVIEW | `h2` + one `p` per paragraph | `overview`, omitted when blank; same heading in both modes |
 | System change (explain mode: How it works) | `h2` + the title as a subtitle + an inline SVG diagram, legend and note chips, all drawn by `render.py` | the `overview` graph in `visuals.json`; replaces the model-drawn PR picture, which still renders when only a legacy `pr` exists; omitted when neither does |
+| All symbols | collapsed `details` inside the System change section, under the legend (where it would be when there is no picture) | the symbol graph, drawn on first open |
 | WALKTHROUGH | `h2` + `section-walkthrough.html` | `walkthrough.py`; each group opens with its own picture from `visuals.json`, matched by group index |
-| All symbols | collapsed `details` | the symbol graph, drawn on first open |
 | Footer | `.foot` | target, timestamp, PR link from `links.json` |
 
 The page has no deterministic "System change" section any more; the picture above is its one

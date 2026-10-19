@@ -552,6 +552,7 @@ _POST_PREVIEW_RE = re.compile(r"^/api/walkthrough/([^/]+)/([^/]+)/post/preview$"
 _POST_RE = re.compile(r"^/api/walkthrough/([^/]+)/([^/]+)/post$")
 _TRIAGE_RE = re.compile(r"^/api/walkthrough/([^/]+)/([^/]+)/triage$")
 _TICKET_RE = re.compile(r"^/api/walkthrough/([^/]+)/([^/]+)/ticket$")
+_RESOLVE_THREAD_RE = re.compile(r"^/api/walkthrough/([^/]+)/([^/]+)/resolve-thread$")
 _TRUST_RE = re.compile(r"^/api/walkthrough/([^/]+)/([^/]+)/trust$")
 _PUBLISH_ONE_RE = re.compile(r"^/api/walkthrough/([^/]+)/([^/]+)/publish-one$")
 _OID_RE = re.compile(r"^o-[0-9a-f]{8}$")
@@ -742,6 +743,9 @@ class _Handler(BaseHTTPRequestHandler):
         m = _TRUST_RE.match(path)
         if m:
             return self._tracked(lambda: self._route_trust(m.group(1), m.group(2)))
+        m = _RESOLVE_THREAD_RE.match(path)
+        if m:
+            return self._tracked(lambda: self._route_resolve_thread(m.group(1), m.group(2)))
         self._tracked(lambda: self._send_text(404, "not found"))
 
     def _route_health(self):
@@ -1198,6 +1202,37 @@ class _Handler(BaseHTTPRequestHandler):
                 started.append({"note_id": n["id"], "qid": qid, "thread_id": qid})
         self._send_json(200, {"started": len(started), "skipped": skipped,
                                "remaining": len(todo) - len(started), "threads": started})
+
+    def _route_resolve_thread(self, key, wid):
+        if not self._check_host() or not self._check_token_header() or not self._check_origin():
+            return
+        raw, too_big = self._read_body()
+        if too_big:
+            return
+        d = self._resolve_dir(key, wid, json_errors=True)
+        if d is None:
+            return
+        try:
+            payload = json.loads(raw) if raw else {}
+        except ValueError:
+            self._send_json(400, {"error": "bad json"})
+            return
+        thread_id = payload.get("thread_id") if isinstance(payload, dict) else None
+        if not isinstance(thread_id, str) or not thread_id:
+            self._send_json(400, {"error": "thread_id must be a string"})
+            return
+        daemon = self.server.cw_daemon
+        if daemon.is_running(d):
+            self._send_json(409, {"error": STILL_BUILDING_MSG})
+            return
+        threads = (cw_store.read_json(d / "threads.json", default=None) or {}).get("threads") or []
+        if not any(t.get("thread_id") == thread_id for t in threads):
+            self._send_json(404, {"error": "thread not found"})
+            return
+        status, resolution = daemon.start_resolve_thread(
+            key, wid, d, thread_id, lambda m: self._render_page(d, m, key, wid))
+        self._send_json(200 if status == "done" else 202,
+                        {"thread_id": thread_id, "status": status, "resolution": resolution})
 
     def _sibling_refusal(self, d):
         """Checked before is_running so the refusal holds while a sibling is still building."""
@@ -1936,6 +1971,7 @@ class Daemon:
         self._qids = set()
         self._qids_lock = threading.Lock()
         self._turns = {}
+        self._resolving = set()
 
     def start(self):
         old = cw_store.read_json(cw_store.server_json_path())
@@ -2032,6 +2068,48 @@ class Daemon:
                     self._run_threads.discard(str(d))
 
         threading.Thread(target=_target, daemon=True).start()
+
+    def start_resolve_thread(self, key, wid, d, thread_id, render):
+        """-> (status, resolution): "done" with the applied resolution when it already exists,
+        else "running" with the worker started (or already started by an earlier call)."""
+        emit = lambda ev, data: self.hub.emit(key, wid, ev, data)  # noqa: E731
+        applied = cw_run.applied_resolution(d, thread_id)
+        token = (str(d), thread_id)
+        with self._ask_locks_guard:
+            if token in self._resolving:
+                return "running", None
+            self._resolving.add(token)
+        with self._inflight_lock:
+            self._asks += 1
+        self._idle_since = None
+        if applied is None:
+            emit("thread_resolution", {"thread_id": thread_id, "status": "running"})
+
+        def _target():
+            error = None
+            try:
+                meta = cw_store.read_meta(d) or {}
+                resolution = applied or cw_run.resolve_one_thread(d, meta, cw_store.load_config(), thread_id)
+                with cw_store.dir_lock(d):
+                    meta2, render_error = render(cw_store.read_meta(d) or meta)
+                if render_error:
+                    error = f"page re-render failed: {render_error}"
+            except Exception as e:
+                error = str(e) or type(e).__name__
+            try:
+                if error:
+                    emit("thread_resolution", {"thread_id": thread_id, "status": "failed", "error": error})
+                else:
+                    emit("thread_resolution", {"thread_id": thread_id, "status": "done", "resolution": resolution})
+                    emit("rebuilt", {"rev": meta2["rev"], "page": "final", "fragments": []})
+            finally:
+                with self._ask_locks_guard:
+                    self._resolving.discard(token)
+                with self._inflight_lock:
+                    self._asks -= 1
+
+        threading.Thread(target=_target, daemon=True).start()
+        return ("done", applied) if applied is not None else ("running", None)
 
     def ask_lock(self, d, thread_id):
         """Per-(walkthrough dir, thread) lock: turns of one thread queue behind each other,
