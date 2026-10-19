@@ -421,6 +421,7 @@ def render_page(daemon, d, meta, key, wid):
     render_args = ["render", "--dir", str(d), "--slug", meta["slug"]]
     if meta.get("title"):
         render_args += ["--title", meta["title"]]
+    render_args += cw_run._hint_args(meta)
     render_result = subprocess.run(
         [sys.executable, str(cw_run.SCRIPTS_DIR / "pipeline.py"), *render_args],
         capture_output=True, text=True)

@@ -814,3 +814,111 @@ def test_run_joins_the_visuals_thread_when_the_run_raises(monkeypatch):
                 "files": files, "overview": "o", "verdict": "v"})]}
             assert cw_run.run(d) == "failed"
         assert done.is_set()
+
+
+def _hint_repo(tmp, message="head"):
+    repo, base, head = cw_testlib.make_repo(tmp, {"a.txt": "1\n"}, {"a.txt": "2\n"})
+    if message != "head":
+        cw_testlib.git(repo, "commit", "-q", "--amend", "-m", message)
+        head = cw_testlib.git(repo, "rev-parse", "HEAD").strip()
+    return {"repo": str(repo), "base": base, "head": head, "head_ref": head}
+
+
+def test_ticket_hint_comes_from_the_branch_name_without_a_ref_to_it():
+    with tempfile.TemporaryDirectory() as tmp:
+        meta = _hint_repo(tmp)
+        cw_testlib.git(meta["repo"], "branch", "feature/TD-218-peer-review")
+
+        assert cw_run.detect_ticket_hint(meta) == {"key": "TD-218", "found_in": "branch"}
+
+
+def test_ticket_hint_falls_back_to_pr_text_then_commits_and_skips_lookalikes(monkeypatch):
+    with tempfile.TemporaryDirectory() as tmp:
+        meta = _hint_repo(tmp, "fix: decode UTF-8 with AES-256 (OPS-7)\n\nFixes #44")
+        assert cw_run.detect_ticket_hint(meta) == {"key": "OPS-7", "found_in": "commit"}
+
+        meta["pr"], meta["gh_repo"] = 5, "o/r"
+        body = {"title": "t", "body": "Closes o/r#12"}
+        monkeypatch.setattr(cw_run, "_gh", lambda m, args, **kw: types.SimpleNamespace(
+            returncode=0, stdout=json.dumps(body)))
+        assert cw_run.detect_ticket_hint(meta) == {"key": "OPS-7", "found_in": "commit"}
+        meta["head_ref"] = "main"
+        assert cw_run.detect_ticket_hint({**meta, "title": "ABC-1 PROJ-2 renamed"}) == {
+            "key": "OPS-7", "found_in": "commit"}
+        body["title"] = "RB-9 renamed"
+        assert cw_run.detect_ticket_hint(meta) == {"key": "RB-9", "found_in": "pr_body"}
+
+
+def test_ticket_hint_takes_a_repo_ref_before_a_closing_bare_number_and_ignores_stray_numbers():
+    with tempfile.TemporaryDirectory() as tmp:
+        meta = _hint_repo(tmp, "chore: bump (#44)\n\nsee #45")
+        assert cw_run.detect_ticket_hint(meta) is None
+        cw_testlib.git(meta["repo"], "commit", "-q", "--amend", "-m", "chore: bump\n\nResolves #45")
+        meta["head"] = cw_testlib.git(meta["repo"], "rev-parse", "HEAD").strip()
+        assert cw_run.detect_ticket_hint(meta) == {"key": "#45", "found_in": "commit"}
+        assert cw_run._ticket_gh_ref("Fixes #1 and o/r#2", bare=True) == "o/r#2"
+
+
+def test_ticket_hint_thread_stores_the_hint_renders_once_and_clears_a_stale_one(monkeypatch):
+    with tempfile.TemporaryDirectory() as tmp:
+        meta = _hint_repo(tmp)
+        d = Path(tmp) / "work"
+        d.mkdir()
+        cw_store.write_json(d / "meta.json", meta)
+        renders = []
+        renderer = types.SimpleNamespace(request=lambda: renders.append(1))
+        monkeypatch.setattr(cw_run, "detect_ticket_hint", lambda m: {"key": "TD-1", "found_in": "branch"})
+
+        cw_run._apply_ticket_hint(d, meta, renderer)
+        assert cw_store.read_meta(d)["ticket_hint"]["key"] == "TD-1" and renders == []
+        (d / "raw.diff").write_text("x")
+        monkeypatch.setattr(cw_run, "detect_ticket_hint", lambda m: {"key": "TD-2", "found_in": "branch"})
+        cw_run._apply_ticket_hint(d, meta, renderer)
+        cw_run._apply_ticket_hint(d, meta, renderer)
+        assert cw_store.read_meta(d)["ticket_hint"]["key"] == "TD-2" and len(renders) == 1
+
+        meta_at = cw_store.read_meta(d)["ticket_hint"]["at"]
+        threading.Event().wait(0.02)
+        cw_run._apply_ticket_hint(d, meta, renderer)
+        assert cw_store.read_meta(d)["ticket_hint"]["at"] > meta_at and len(renders) == 1
+
+        renderer.closed = True
+        monkeypatch.setattr(cw_run, "detect_ticket_hint", lambda m: {"key": "TD-3", "found_in": "branch"})
+        cw_run._apply_ticket_hint(d, meta, renderer)
+        assert cw_store.read_meta(d)["ticket_hint"]["key"] == "TD-3" and len(renders) == 1
+        renderer.closed = False
+
+        monkeypatch.setattr(cw_run, "detect_ticket_hint", lambda m: 1 / 0)
+        cw_run._apply_ticket_hint(d, meta, renderer)
+        assert "ticket_hint" not in cw_store.read_meta(d) and len(renders) == 2
+
+
+def test_partial_renders_never_run_at_the_same_time(monkeypatch):
+    with tempfile.TemporaryDirectory() as tmp:
+        d, meta = Path(tmp), {"repo": "r", "base": "b", "head": "h", "target": "t", "ticket_hint": {"key": "A-1"}}
+        cw_store.write_json(d / "meta.json", meta)
+        active, peak, args_seen = [], [], []
+
+        def fake_run(cmd, **kw):
+            active.append(1)
+            peak.append(len(active))
+            args_seen.append(cmd)
+            threading.Event().wait(0.05)
+            active.pop()
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(cw_run.subprocess, "run", fake_run)
+        threads = [threading.Thread(target=cw_run.render_partial, args=(d, meta)) for _ in range(3)]
+        [t.start() for t in threads]
+        [t.join() for t in threads]
+
+        assert max(peak) == 1 and all("--ticket-hint" in c for c in args_seen)
+
+
+def test_ticket_hint_is_none_without_a_reference_or_in_explain_mode():
+    with tempfile.TemporaryDirectory() as tmp:
+        meta = _hint_repo(tmp, "fix: decode UTF-8")
+
+        assert cw_run.detect_ticket_hint(meta) is None
+        assert cw_run.detect_ticket_hint({**meta, "explain": True, "head_ref": "TD-1"}) is None
+

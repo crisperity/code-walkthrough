@@ -7,7 +7,7 @@ Usage:
   pipeline.py early --dir D --repo R --base B --head H
   pipeline.py prepare --dir D --repo R --base B --head H [--pr N] [--paths P ...]
       [--explain] [--prior] [--links-cached]
-  pipeline.py render --dir D --slug S [--title T]
+  pipeline.py render --dir D --slug S [--title T] [--ticket-hint JSON]
   pipeline.py all --dir D --repo R --base B --head H --slug S [--title T] [--pr N]
       [--paths P ...] [--explain] [--prior] [--links-cached]
   pipeline.py partial --dir D --repo R --base B --head H --target T [--paths P ...] [--explain] [--title T]
@@ -215,12 +215,13 @@ def _symdelta_file(d):
     return model if model.exists() else real
 
 
-def _optional_data_flags(d):
-    """render.py's --symdelta/--complexity/--visuals/--context for whichever of the files exist. Passing
-    --complexity also turns on the Complexity fact in the facts strip."""
-    return [arg for flag, path in (("--symdelta", _symdelta_file(d)), ("--complexity", d / "complexity.json"),
-                                   ("--visuals", d / "visuals.json"), ("--context", d / "context.json"))
-            if path.exists() for arg in (flag, str(path))]
+def _optional_data_flags(d, ticket_hint=None):
+    """render.py's --symdelta/--complexity/--visuals/--context for whichever of the files exist, plus
+    --ticket-hint when the caller has one. Passing --complexity also turns on the Complexity fact in the facts strip."""
+    flags = [arg for flag, path in (("--symdelta", _symdelta_file(d)), ("--complexity", d / "complexity.json"),
+                                    ("--visuals", d / "visuals.json"), ("--context", d / "context.json"))
+             if path.exists() for arg in (flag, str(path))]
+    return flags + (["--ticket-hint", ticket_hint] if ticket_hint else [])
 
 
 def cmd_render(args):
@@ -246,7 +247,7 @@ def cmd_render(args):
         render_cmd.append("--explain")
     if pipeline.get("links_ok"):
         render_cmd += ["--links", str(d / "links.json")]
-    render_cmd += _optional_data_flags(d)
+    render_cmd += _optional_data_flags(d, args.ticket_hint)
     if args.title:
         render_cmd += ["--title", args.title]
 
@@ -334,7 +335,7 @@ def cmd_partial(args):
                   "--template", str(SKILL_DIR / "assets" / "diff-review-template.html"),
                   "--walkthrough", str(partial_dir / "section-walkthrough.html"),
                   "--state", str(state_path), "--building"]
-    render_cmd += _optional_data_flags(d)
+    render_cmd += _optional_data_flags(d, args.ticket_hint)
     if args.explain:
         render_cmd.append("--explain")
     if args.title:
@@ -387,6 +388,7 @@ def build_parser():
     def add_render_args(sp):
         sp.add_argument("--slug", required=True)
         sp.add_argument("--title")
+        sp.add_argument("--ticket-hint")
 
     prepare = sub.add_parser("prepare")
     add_prepare_args(prepare)
@@ -411,6 +413,7 @@ def build_parser():
     partial.add_argument("--paths", nargs="*", default=[])
     partial.add_argument("--explain", action="store_true")
     partial.add_argument("--title")
+    partial.add_argument("--ticket-hint")
     partial.set_defaults(func=cmd_partial)
 
     return parser

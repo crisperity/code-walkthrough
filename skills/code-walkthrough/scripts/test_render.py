@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import cw_server  # noqa: E402
 from cw_testlib import require_node, skip  # noqa: E402
 from render import (  # noqa: E402
-    render_html, load_visuals, clean_context, context_html, counts_from, overview_layout, overview_svg,
+    render_html, load_visuals, clean_context, clean_ticket_hint, context_html, counts_from, overview_layout, overview_svg,
     visuals_mod,
     CONTENT_PLACEHOLDER, TITLE_PLACEHOLDER,
 )
@@ -1618,6 +1618,62 @@ def test_building_page_shows_skeletons_for_verdict_and_context_not_the_link_form
     assert 'id="cw-context"' in page
     final = html(blank)
     assert "cw-skel-line\"" not in final and '<form class="cw-ctx-link">' in final
+
+
+def test_ticket_hint_shows_a_skeleton_card_with_the_key_not_the_link_form():
+    _order, files = parsed()
+    hint = {"key": "TD-218", "found_in": "branch"}
+    for building in (False, True):
+        out = context_html(None, files, "", building, hint)
+        shown = out.split("<template>")[0]
+        assert 'data-ticket-hint="TD-218"' in out and '<span class="cw-ctx-key">TD-218</span>' in shown
+        assert "found in branch name" in shown and "Comparing with the diff" in shown and "cw-skel-line" in shown
+        assert "<form" not in shown and "<template><form class=\"cw-ctx-link\">" in out
+    assert "data-ticket-hint" not in context_html(None, files, "", False, None)
+    assert '<form class="cw-ctx-link">' in context_html(None, files, "", False, None)
+    clean, _ = clean_context(_ctx())
+    assert "data-ticket-hint" not in context_html(clean, files, "", False, hint)
+
+
+def test_ticket_hint_is_escaped_and_capped_and_junk_is_dropped():
+    assert clean_ticket_hint({"key": "x" * 200, "found_in": "nowhere", "at": "soon"}) == {
+        "key": "x" * 80, "found_in": None, "at": None}
+    assert clean_ticket_hint({"key": "A-1", "found_in": ["branch"], "at": 5.5})["found_in"] is None
+    assert clean_ticket_hint({"key": "A-1", "found_in": "branch", "at": 7})["at"] == 7
+    assert all(clean_ticket_hint({"key": "A-1", "at": v})["at"] is None for v in (float("inf"), float("nan")))
+    assert clean_ticket_hint({"key": " "}) is None and clean_ticket_hint("TD-1") is None
+    _order, files = parsed()
+    out = context_html(None, files, "", False, {"key": "<b>&", "found_in": None})
+    assert "<b>" not in out and "&lt;b&gt;&amp;" in out
+
+
+def test_template_arms_the_hint_skeleton_to_become_the_prefilled_link_form_after_120s():
+    tpl = _real_template()
+    arm = tpl[tpl.index("function armCtxHint()"):]
+    arm = arm[:arm.index("armCtxHint();")]
+
+    assert "120000-(Date.now()-at*1000)" in arm and "sec.dataset.hintAt" in arm and "sec.__cwTimer=setTimeout" in arm
+    assert "sec.isConnected" in arm and "wireCtxLink(form)" in arm and ".value=sec.dataset.ticketHint" in arm
+    _order, files = parsed()
+    out = context_html(None, files, "", False, {"key": "TD-1", "found_in": None, "at": 1700000000.9})
+    assert 'data-hint-at="1700000000"' in out
+
+
+def test_live_rebuilt_bursts_coalesce_and_swap_in_place_with_reload_only_for_bound_blocks():
+    tpl = _real_template()
+    swap = tpl[tpl.index("function swapInPlace("):tpl.index("function applyUpdate()")]
+
+    apply = tpl[tpl.index("function applyUpdate()"):tpl.index("function onPageUpdated(")]
+    assert "firstAt+5000-now" in tpl and "Math.min(1000," in tpl and "clearTimeout(updateTimer)" in tpl
+    assert "es.addEventListener('rebuilt'" in tpl and "else doReload()" in apply
+    assert "if(my!==seq) return" in apply and "try{ ok=swapInPlace(html); }catch(e){ ok=false; }" in apply
+    assert "LIVE.rev=Math.max(LIVE.rev,rev)" in apply and ".catch(showReloadPill)" in apply
+    assert "LIVE.rev=data.rev" not in tpl
+    assert "DOMParser" in swap and "nextState!==base.state" in swap and "blocks.length!==base.blocks.length" in swap
+    assert "window.scrollTo(0,y)" in swap and "wireCtxLink" in swap and "armCtxHint()" in swap
+    for bound in ("details", ".mermaid", "svg", "pre", "dialog", ".cw-vis", "#wt-ctl", "h3.wt-group"):
+        assert bound in tpl[tpl.index("const BOUND="):tpl.index("const isBound")]
+    assert "if(busyEditing()){ showReloadPill(); return; }" in tpl
 
 
 def test_building_page_keeps_a_real_verdict_and_context():

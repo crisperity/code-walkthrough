@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from collections import defaultdict
 from pathlib import Path
 
@@ -471,6 +472,14 @@ def _merged_fragment_files(d, batch_count):
     return files
 
 
+_PARTIAL_LOCK = threading.Lock()
+
+
+def _hint_args(meta):
+    hint = meta.get("ticket_hint")
+    return ["--ticket-hint", json.dumps(hint)] if hint else []
+
+
 def render_partial(d, meta):
     """Run `pipeline.py partial` once; bump meta.rev on success. Raises CWError on failure."""
     args = ["partial", "--dir", str(d), "--repo", meta["repo"], "--base", meta["base"],
@@ -481,10 +490,12 @@ def render_partial(d, meta):
         args.append("--explain")
     if meta.get("title"):
         args += ["--title", meta["title"]]
-    result = subprocess.run(
-        [sys.executable, str(SCRIPTS_DIR / "pipeline.py"), *args],
-        capture_output=True, text=True, timeout=300,
-    )
+    args += _hint_args(meta)
+    with _PARTIAL_LOCK:
+        result = subprocess.run(
+            [sys.executable, str(SCRIPTS_DIR / "pipeline.py"), *args],
+            capture_output=True, text=True, timeout=300,
+        )
     if result.returncode != 0:
         raise cw_store.CWError(f"partial render failed: {result.stderr.strip()[:500]}")
     return cw_store.update_meta(d, lambda m: m.update({"rev": m.get("rev", 0) + 1}))
@@ -1490,6 +1501,7 @@ def _final_build(d, meta, config, on_event):
         render_args = ["render", "--dir", str(d), "--slug", meta["slug"]]
         if meta.get("title"):
             render_args += ["--title", meta["title"]]
+        render_args += _hint_args(cw_store.read_meta(d) or meta)
         result = subprocess.run([sys.executable, str(SCRIPTS_DIR / "pipeline.py"), *render_args],
                                  capture_output=True, text=True)
         if result.returncode != 0:
@@ -1778,6 +1790,87 @@ def _fail_run_from_step(d, on_event, step_name, gate_message):
         _fail_run(d, on_event, gate_message)
 
 
+TICKET_KEY = re.compile(r"\b[A-Z][A-Z0-9]+-\d+\b")
+TICKET_REPO_REF = re.compile(r"(?<![\w/])[\w.-]+/[\w.-]+#\d+\b")
+TICKET_CLOSING_REF = re.compile(r"\b(?:fix(?:e[sd])?|close[sd]?|ref(?:s|erences)?|resolve[sd]?)\s+(#\d+)\b", re.I)
+NOT_TICKET_PREFIX = {"UTF", "ISO", "SHA", "CVE", "RFC", "X86", "MD5", "AES", "GPT", "ARM", "TLS", "COVID",
+                     "ABC", "PROJ", "XXX", "TODO", "FIXME"}
+
+
+def _ticket_key(text):
+    for m in TICKET_KEY.finditer(text):
+        if m.group().partition("-")[0] not in NOT_TICKET_PREFIX:
+            return m.group()
+    return None
+
+
+def _ticket_gh_ref(text, bare):
+    m = TICKET_REPO_REF.search(text)
+    if m:
+        return m.group()
+    m = TICKET_CLOSING_REF.search(text) if bare else None
+    return m.group(1) if m else None
+
+
+def detect_ticket_hint(meta):
+    """{key, found_in} for the first ticket reference in the branch name, PR title/body or commit
+    messages, or None. Never fetches the ticket; the agent's context comparison does that."""
+    if meta.get("explain") or not all(meta.get(k) for k in ("repo", "base", "head")):
+        return None
+
+    def out(cmd):
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            return r.stdout if r.returncode == 0 else ""
+        except (OSError, subprocess.SubprocessError):
+            return ""
+
+    repo = ["git", "-C", meta["repo"]]
+    branches = out([*repo, "for-each-ref", "--points-at", meta["head"], "--format=%(refname:short)",
+                    "refs/heads", "refs/remotes"])
+    pr_text = meta.get("title") or ""
+    if meta.get("pr"):
+        try:
+            gh = _gh(meta, ["pr", "view", str(meta["pr"]), "--repo", meta["gh_repo"], "--json", "title,body"],
+                     timeout=10)
+            data = json.loads(gh.stdout) if gh.returncode == 0 else {}
+            pr_text += "\n" + (data.get("title") or "") + "\n" + (data.get("body") or "")
+        except (cw_store.CWError, ValueError, AttributeError):
+            pass
+    sources = (("branch", f"{meta.get('head_ref') or ''}\n{branches}"), ("pr_body", pr_text),
+               ("commit", out([*repo, "log", "--format=%B", f"{meta['base']}..{meta['head']}"])))
+    for found_in, text in sources:
+        key = _ticket_key(text)
+        if key:
+            return {"key": key, "found_in": found_in}
+    for found_in, text in sources[1:]:
+        key = _ticket_gh_ref(text, bare=found_in == "commit")
+        if key:
+            return {"key": key, "found_in": found_in}
+    return None
+
+
+def _apply_ticket_hint(d, meta, renderer):
+    """Best-effort and off the build's path: store the detected hint (or clear a stale one) and
+    re-render the skeleton, once raw.diff exists for the partial render to read."""
+    try:
+        hint = detect_ticket_hint(meta)
+    except Exception:
+        hint = None
+    old = (cw_store.read_meta(d) or {}).get("ticket_hint")
+    same = bool(hint) and bool(old) and (hint["key"], hint["found_in"]) == (old.get("key"), old.get("found_in"))
+    if hint is None and old is None:
+        return
+    if hint:
+        hint["at"] = time.time()
+    if same:
+        cw_store.update_meta(d, lambda m: m["ticket_hint"].update({"at": hint["at"]}) if m.get("ticket_hint") else None)
+        return
+    cw_store.update_meta(d, lambda m: m.update({"ticket_hint": hint}) if hint else m.pop("ticket_hint", None))
+    if (d / "raw.diff").exists() and not getattr(renderer, "closed", False):
+        renderer.request()
+
+
 def run(d, on_event=None):
     d = Path(d)
     on_event = on_event or (lambda ev, data: None)
@@ -1788,6 +1881,9 @@ def run(d, on_event=None):
         config = cw_store.load_config()
         meta = cw_store.read_meta(d) or {}
 
+        hint_thread = threading.Thread(target=_apply_ticket_hint, args=(d, meta, renderer), daemon=True)
+        hint_thread.start()
+
         head_dir = d / "head"
         if not head_dir.exists():
             add_worktree(meta["repo"], meta["head"], head_dir, symlinks=False)
@@ -1796,6 +1892,7 @@ def run(d, on_event=None):
             meta = cw_store.update_meta(d, lambda m: m.update({"refresh": False}))
             renderer.wait_idle(timeout=60)
             _run_visuals(d, meta, config, on_event)
+            hint_thread.join(timeout=20)
             final_ok = _final_build(d, meta, config, on_event)
             return "done" if final_ok else "failed"
 
@@ -1878,6 +1975,7 @@ def run(d, on_event=None):
 
         renderer.wait_idle(timeout=60)
         visuals_thread.join()
+        hint_thread.join(timeout=20)
         meta = cw_store.read_meta(d) or meta
         final_ok = _final_build(d, meta, config, on_event)
         return "done" if final_ok else "failed"
@@ -1889,6 +1987,8 @@ def run(d, on_event=None):
     finally:
         if visuals_thread:
             visuals_thread.join()
+        renderer.closed = True
+        renderer.wait_idle(timeout=60)
         with _RENDERERS_LOCK:
             _RENDERERS.pop(str(d), None)
 
