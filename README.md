@@ -1,7 +1,6 @@
 # crisperity-skills
 
-Agent skills I use on real work, packaged so you can install them. One so far,
-code-walkthrough.
+Claude Code plugin with skills I use on real work. One so far, code-walkthrough.
 
 ## code-walkthrough
 
@@ -113,34 +112,9 @@ nothing else changes.
 
 ## Install
 
-<details>
-<summary><strong>Claude Code</strong></summary>
+Claude Code plugin only. Other harnesses are untested.
 
 ```
 /plugin marketplace add crisperity/crisperity-skills
 /plugin install crisperity-skills@crisperity
 ```
-
-</details>
-
-<details>
-<summary><strong>Any other harness</strong></summary>
-
-A skill is a directory with a `SKILL.md` in it, so anything that reads that
-format picks it up.
-
-```bash
-git clone https://github.com/crisperity/crisperity-skills.git
-cd crisperity-skills
-./install.sh                            # ~/.claude/skills
-./install.sh ~/.config/some-harness/skills
-```
-
-`install.sh` symlinks rather than copies, so `git pull` updates what you have
-installed.
-
-</details>
-
-## License
-
-MIT
