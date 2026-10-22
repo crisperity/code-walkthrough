@@ -528,7 +528,7 @@
      .fb-item's font-size/colour; only needs its own box and full-width sizing. */
   .fb-item textarea.fb-draft-body{display:block;width:100%;margin-top:4px;
     background:var(--panel2);border:1px solid var(--border);color:var(--text);
-    border-radius:6px;padding:6px;min-height:48px;resize:vertical;
+    border-radius:6px;padding:6px;min-height:48px;resize:none;overflow:hidden;
     font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
     font-size:var(--fs-sm);line-height:1.5}
   .fb-item textarea.fb-draft-body:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -905,7 +905,6 @@
   .cw-turn{margin:8px 0}
   .cw-turn-q{margin:0;color:var(--muted);font-style:italic;overflow-wrap:anywhere;white-space:pre-wrap}
   .cw-turn-a{margin:4px 0 0;overflow-wrap:anywhere}
-  .cw-streaming{white-space:pre-wrap}
   .cw-md>*{margin:6px 0}
   .cw-md>:first-child{margin-top:0}
   .cw-md pre{white-space:pre-wrap;max-width:100%;overflow-x:auto}
@@ -1066,38 +1065,76 @@
     color:var(--text);border-radius:6px;font:inherit;font-size:var(--fs-xs);cursor:pointer}
   .cw-ref-acts button:hover{border-color:var(--purple)}
 
-  #cw-post-confirm{position:fixed;inset:0;margin:auto;width:min(560px,92vw);max-height:82vh;padding:0;background:var(--panel);
-    border:1px solid var(--border);border-radius:10px;color:var(--text)}
+  #cw-post-confirm{position:fixed;inset:0;margin:auto;width:min(580px,94vw);max-height:84vh;padding:0;background:var(--panel);
+    border:1px solid var(--border);border-radius:10px;color:var(--text);box-shadow:0 12px 40px rgba(0,0,0,.35)}
+  #cw-post-confirm[open]{display:flex;flex-direction:column}
   #cw-post-confirm::backdrop{background:rgba(0,0,0,.6)}
-  #cw-post-confirm-head{display:flex;align-items:center;justify-content:space-between;
-    padding:14px 16px;border-bottom:1px solid var(--border);font-weight:600}
-  #cw-post-confirm-close{background:var(--panel2);border:1px solid var(--border);color:var(--text);
+  #cw-post-confirm-head{flex:none;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;
+    padding:14px 16px;border-bottom:1px solid var(--border)}
+  #cw-post-confirm-titles{min-width:0;display:flex;flex-direction:column;gap:2px}
+  #cw-post-confirm-title{font-weight:600}
+  #cw-post-confirm-close{flex:none;background:var(--panel2);border:1px solid var(--border);color:var(--text);
     border-radius:6px;width:28px;height:28px;cursor:pointer;font-size:14px;line-height:1;
     transition:background .12s}
   #cw-post-confirm-close:hover{background:var(--border)}
   #cw-post-confirm-close:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-  #cw-post-confirm-body{padding:14px 16px;overflow-y:auto;max-height:calc(82vh - 60px)}
-  #cw-post-confirm-notes,#cw-post-confirm-resolves,#cw-post-confirm-items{list-style:none;
-    margin:0 0 12px;padding:0;display:flex;flex-direction:column;gap:8px}
-  #cw-post-confirm-notes pre,#cw-post-confirm-resolves pre{margin:2px 0 0;padding:6px 8px;
-    background:var(--panel2);border:1px solid var(--border);border-radius:6px;
-    white-space:pre-wrap;overflow-wrap:anywhere;font-family:var(--mono);font-size:var(--fs-xs)}
-  #cw-post-confirm-notes label{display:flex;align-items:flex-start;gap:6px;font-size:var(--fs-sm)}
+  #cw-post-confirm-body{flex:1 1 auto;min-height:0;padding:14px 16px;overflow-y:auto}
   #cw-post-confirm-pending{margin:0 0 12px;padding:8px 10px;border:1px solid var(--border);
     border-radius:6px;background:var(--panel2);font-size:var(--fs-sm)}
-  #cw-post-options{margin:0 0 12px;font-size:var(--fs-sm)}
-  #cw-post-options summary{cursor:pointer}
-  #cw-post-options fieldset{border:0;margin:8px 0;padding:0;display:flex;flex-direction:column;gap:4px}
-  #cw-post-options label{display:flex;align-items:center;gap:6px}
-  #cw-post-approve-note{margin:0 0 6px;color:var(--muted);font-size:var(--fs-xs)}
+  #cw-post-verdict{display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--panel2)}
+  #cw-post-verdict label{position:relative;flex:1;padding:7px 8px;text-align:center;font-size:var(--fs-sm);
+    color:var(--muted);cursor:pointer;border-left:1px solid var(--border)}
+  #cw-post-verdict label:first-child{border-left:0}
+  #cw-post-verdict input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:inherit}
+  #cw-post-verdict label:has(input:checked){color:var(--text);font-weight:600;
+    background:color-mix(in srgb,var(--accent) 20%,var(--panel2))}
+  #cw-post-verdict label:has(input[value=APPROVE]:checked){background:color-mix(in srgb,var(--green) 22%,var(--panel2))}
+  #cw-post-verdict label:has(input[value=REQUEST_CHANGES]:checked){background:color-mix(in srgb,var(--red) 22%,var(--panel2))}
+  #cw-post-verdict label:has(input:disabled){opacity:.4;cursor:not-allowed}
+  #cw-post-verdict label:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:-2px}
+  #cw-post-hint{margin:6px 0 12px;color:var(--muted);font-size:var(--fs-xs)}
+  #cw-post-hint.warn{color:var(--yellow)}
   #cw-post-summary{width:100%;min-height:70px;background:var(--panel2);border:1px solid var(--border);
-    color:var(--text);border-radius:6px;padding:8px;font:inherit;font-size:var(--fs-sm)}
-  #cw-post-confirm-partial{margin:0 0 12px;font-size:var(--fs-sm)}
+    color:var(--text);border-radius:6px;padding:8px;font:inherit;font-size:var(--fs-sm);resize:vertical}
+  .cw-pc-sec{margin-top:14px}
+  .cw-pc-sec-h{display:flex;align-items:center;justify-content:space-between;margin:0 0 6px;
+    font-size:var(--fs-xs);font-weight:600;color:var(--muted)}
+  #cw-post-toggle{background:none;border:0;padding:0;color:var(--accent);font:inherit;cursor:pointer}
+  #cw-post-toggle:hover:not(:disabled){text-decoration:underline}
+  #cw-post-toggle:disabled{opacity:.45;cursor:not-allowed}
+  #cw-post-confirm-notes,#cw-post-confirm-resolves,#cw-post-confirm-inreview{list-style:none;margin:0;padding:0;
+    display:flex;flex-direction:column;gap:6px}
+  .cw-pc-row{padding:8px 10px;background:var(--panel2);border:1px solid var(--border);border-radius:8px}
+  .cw-pc-row.off{opacity:.55}
+  .cw-pc-row.off .cw-pc-body{text-decoration:line-through}
+  .cw-pc-h{display:flex;align-items:center;gap:8px;font-size:var(--fs-xs)}
+  label.cw-pc-h{cursor:pointer}
+  .cw-pc-where{min-width:0;font-family:var(--mono);overflow-wrap:anywhere}
+  .cw-pc-st{margin-left:auto;flex:none;max-width:50%;text-align:right;overflow-wrap:anywhere;color:var(--muted)}
+  .cw-pc-st.ok{color:var(--green)}
+  .cw-pc-st.bad{color:var(--red)}
+  .cw-pc-body{margin:4px 0 0;font-size:var(--fs-sm);overflow:hidden;display:-webkit-box;
+    -webkit-line-clamp:3;-webkit-box-orient:vertical;overflow-wrap:anywhere}
+  .cw-pc-body>*{margin:0}
+  .cw-pc-note .cw-pc-body{margin-left:24px}
+  #cw-post-confirm-partial{margin:12px 0 0;font-size:var(--fs-sm)}
   #cw-post-confirm-partial .fb-actions{flex-wrap:wrap}
   #cw-post-confirm-actions[hidden]{display:none}
   .fb-review-tag{margin-left:6px;color:var(--accent);font-size:var(--fs-xs)}
-  #cw-post-confirm-items{color:var(--muted);font-size:var(--fs-xs)}
-  #cw-post-confirm-status{min-height:1.2em;font-size:var(--fs-xs);color:var(--muted);margin:8px 0 0}
+  #cw-post-confirm-foot{flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;
+    padding:10px 16px;border-top:1px solid var(--border);background:var(--panel)}
+  #cw-post-confirm-foot .fb-actions{margin:0}
+  #cw-post-confirm-stat{display:flex;align-items:center;gap:8px;min-width:0;font-size:var(--fs-xs);color:var(--muted)}
+  #cw-post-confirm-status{min-height:1.2em}
+  #cw-post-confirm-status.err{color:var(--red)}
+  .cw-post-spin{flex:none;width:12px;height:12px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%}
+  .cw-post-spin[hidden]{display:none}
+  @media (prefers-reduced-motion:no-preference){.cw-post-spin{animation:cw-post-spin .8s linear infinite}}
+  @keyframes cw-post-spin{to{transform:rotate(360deg)}}
+  #cw-post-confirm[data-ev=APPROVE] #cw-post-confirm-send{background:var(--green);border-color:var(--green)}
+  #cw-post-confirm[data-ev=APPROVE] #cw-post-confirm-send:hover:not(:disabled){background:color-mix(in srgb,var(--green) 88%,#000)}
+  #cw-post-confirm[data-ev=REQUEST_CHANGES] #cw-post-confirm-send{background:var(--red);border-color:var(--red)}
+  #cw-post-confirm[data-ev=REQUEST_CHANGES] #cw-post-confirm-send:hover:not(:disabled){background:color-mix(in srgb,var(--red) 88%,#000)}
 
   /* Model-drawn pictures (render.py's cw-pr-picture and per-group cw-vis-group). The fragments
      are written against T3's theme names, so they are aliased to this page's tokens here and
@@ -1322,27 +1359,33 @@ if(window.CW_LIVE){
 
 <dialog id="cw-post-confirm" aria-labelledby="cw-post-confirm-title">
   <div id="cw-post-confirm-head">
-    <span id="cw-post-confirm-title">Submit review</span>
+    <div id="cw-post-confirm-titles">
+      <span id="cw-post-confirm-title">Submit review</span>
+    </div>
     <button type="button" id="cw-post-confirm-close" aria-label="Close">✕</button>
   </div>
   <div id="cw-post-confirm-body">
     <p id="cw-post-confirm-pending" hidden></p>
-    <ul id="cw-post-confirm-notes"></ul>
-    <ul id="cw-post-confirm-resolves"></ul>
-    <ul id="cw-post-confirm-inreview"></ul>
-    <details id="cw-post-options">
-      <summary>Review options</summary>
-      <fieldset>
-        <legend>Event</legend>
-        <label><input type="radio" name="cw-post-event" value="COMMENT" checked> Comment</label>
-        <label><input type="radio" name="cw-post-event" value="APPROVE"> Approve</label>
-        <label><input type="radio" name="cw-post-event" value="REQUEST_CHANGES"> Request changes</label>
-      </fieldset>
-      <p id="cw-post-approve-note" hidden></p>
-      <label for="cw-post-summary">Summary</label>
-      <textarea id="cw-post-summary" placeholder="Review summary (optional)"></textarea>
-    </details>
-    <ul id="cw-post-confirm-items"></ul>
+    <div id="cw-post-verdict" role="radiogroup" aria-label="Review verdict">
+      <label><input type="radio" name="cw-post-event" value="COMMENT" checked><span>Comment</span></label>
+      <label><input type="radio" name="cw-post-event" value="APPROVE"><span>Approve</span></label>
+      <label><input type="radio" name="cw-post-event" value="REQUEST_CHANGES"><span>Request changes</span></label>
+    </div>
+    <p id="cw-post-hint"></p>
+    <label for="cw-post-summary" class="cw-pc-sec-h">Summary</label>
+    <textarea id="cw-post-summary" placeholder="Review summary (optional)"></textarea>
+    <section class="cw-pc-sec" id="cw-post-notes-sec" hidden>
+      <div class="cw-pc-sec-h"><span id="cw-post-notes-h"></span><button type="button" id="cw-post-toggle">Untick all</button></div>
+      <ul id="cw-post-confirm-notes"></ul>
+    </section>
+    <section class="cw-pc-sec" id="cw-post-resolves-sec" hidden>
+      <div class="cw-pc-sec-h" id="cw-post-resolves-h"></div>
+      <ul id="cw-post-confirm-resolves"></ul>
+    </section>
+    <section class="cw-pc-sec" id="cw-post-inreview-sec" hidden>
+      <div class="cw-pc-sec-h" id="cw-post-inreview-h"></div>
+      <ul id="cw-post-confirm-inreview"></ul>
+    </section>
     <div id="cw-post-confirm-partial" role="status" hidden>
       <p id="cw-post-partial-text"></p>
       <div class="fb-actions">
@@ -1351,11 +1394,13 @@ if(window.CW_LIVE){
         <button type="button" id="cw-post-leave" class="fb-ghost">Leave pending</button>
       </div>
     </div>
+  </div>
+  <div id="cw-post-confirm-foot">
+    <span id="cw-post-confirm-stat"><i id="cw-post-spin" class="cw-post-spin" hidden></i><span id="cw-post-confirm-status" role="status"></span></span>
     <div id="cw-post-confirm-actions" class="fb-actions">
-      <button type="button" id="cw-post-confirm-send" class="fb-primary">Submit review</button>
       <button type="button" id="cw-post-confirm-cancel" class="fb-ghost">Cancel</button>
+      <button type="button" id="cw-post-confirm-send" class="fb-primary">Comment</button>
     </div>
-    <p id="cw-post-confirm-status" role="status"></p>
   </div>
 </dialog>
 
@@ -2677,6 +2722,10 @@ if(window.CW_LIVE){
       ta.placeholder='Comment on this line...'; ta.value=n.body;
       ta.setAttribute('aria-label','Comment body');
       wireDraftAutosave(ta,n.id);
+      const fit=()=>{ ta.style.height='auto'; if(ta.scrollHeight) ta.style.height=ta.scrollHeight+2+'px'; };
+      let fitW=0;
+      new ResizeObserver(()=>{ if(ta.offsetWidth!==fitW){ fitW=ta.offsetWidth; fit(); } }).observe(ta);
+      ta.addEventListener('input',fit);
       d.appendChild(ta);
       if(window.CW_LIVE){
         const pub=document.createElement('button'); pub.type='button'; pub.className='fb-publish-one fb-ghost';
@@ -3512,16 +3561,17 @@ if(window.CW_LIVE){
     const $$=id=>document.getElementById(id);
     const postBtn=$$('hr-comments-post-btn'), dlg=$$('cw-post-confirm'),
       close=$$('cw-post-confirm-close'), titleEl=$$('cw-post-confirm-title'),
-      pendingNote=$$('cw-post-confirm-pending'), notesList=$$('cw-post-confirm-notes'),
-      resolvesList=$$('cw-post-confirm-resolves'), inReviewList=$$('cw-post-confirm-inreview'),
-      options=$$('cw-post-options'), approveNote=$$('cw-post-approve-note'),
-      summary=$$('cw-post-summary'), itemsList=$$('cw-post-confirm-items'),
+      pendingNote=$$('cw-post-confirm-pending'), notesSec=$$('cw-post-notes-sec'), notesHead=$$('cw-post-notes-h'),
+      toggleBtn=$$('cw-post-toggle'), notesList=$$('cw-post-confirm-notes'),
+      resolvesSec=$$('cw-post-resolves-sec'), resolvesHead=$$('cw-post-resolves-h'), resolvesList=$$('cw-post-confirm-resolves'),
+      inReviewSec=$$('cw-post-inreview-sec'), inReviewHead=$$('cw-post-inreview-h'), inReviewList=$$('cw-post-confirm-inreview'),
+      hintEl=$$('cw-post-hint'), summary=$$('cw-post-summary'),
       partial=$$('cw-post-confirm-partial'), partialText=$$('cw-post-partial-text'),
       retryBtn=$$('cw-post-retry'), nowBtn=$$('cw-post-send-now'), leaveBtn=$$('cw-post-leave'),
       sendBtn=$$('cw-post-confirm-send'), cancelBtn=$$('cw-post-confirm-cancel'),
       actionsEl=$$('cw-post-confirm-actions'),
-      status=$$('cw-post-confirm-status');
-    if(!postBtn||!dlg||!close||!notesList||!resolvesList||!itemsList||!sendBtn||!status||!summary||!partial) return;
+      status=$$('cw-post-confirm-status'), spin=$$('cw-post-spin');
+    if(!postBtn||!dlg||!close||!notesList||!resolvesList||!sendBtn||!status||!summary||!partial) return;
     postBtn.hidden=!canGhCommand;
     postBtn.textContent='Submit review';
 
@@ -3543,62 +3593,77 @@ if(window.CW_LIVE){
     }
     refreshPanelSubmit=updatePanelSubmit;
 
-    let nonce=null, lastResolves=[], full=[], excluded=new Set(), review={pending:false,comments:0},
-      loading=false, posting=false, starting=false, done=false, seq=0, opener=postBtn, progress=new Map(), failedNoteIds=[];
+    let nonce=null, nonceIds=null, lastResolves=[], full=[], excluded=new Set(), review={pending:false,comments:0}, own=false,
+      loading=false, waiting=false, posting=false, starting=false, done=false, seq=0, opener=postBtn, slots=new Map(), failedNoteIds=[];
 
     const selectedIds=()=>full.filter(n=>!excluded.has(n.id)).map(n=>n.id);
+    const say=(t,err,busy)=>{ status.textContent=t; status.classList.toggle('err',!!err); spin.hidden=!busy; };
+    const VERDICT={COMMENT:'Comment',APPROVE:'Approve',REQUEST_CHANGES:'Request changes'};
+    const HINT={COMMENT:'Posts your comments without approving or blocking.',APPROVE:'Approves the pull request.',
+      REQUEST_CHANGES:'Marks the pull request as needing changes before it can merge.'};
 
     function syncSend(){
-      const rc=selEvent()==='REQUEST_CHANGES'&&!summary.value.trim();
-      const idle=!selectedIds().length&&!lastResolves.length&&!review.pending;
-      sendBtn.disabled=nonce==null||loading||posting||done||rc||idle;
+      const ev=selEvent(), sel=selectedIds().length, n=sel+lastResolves.length;
+      const rc=ev==='REQUEST_CHANGES'&&!summary.value.trim();
+      const idle=!sel&&!lastResolves.length&&!review.pending;
+      dlg.dataset.ev=ev;
+      sendBtn.textContent=VERDICT[ev]+(n?' · '+n:'');
+      sendBtn.disabled=posting||done||rc||idle;
+      hintEl.textContent=rc?'Request changes needs a summary.':HINT[ev]+(own?" You can't approve your own pull request.":'');
+      hintEl.classList.toggle('warn',rc);
+      notesSec.hidden=!full.length;
+      notesHead.textContent='Comments · '+sel+' of '+full.length;
+      toggleBtn.textContent=sel===full.length?'Untick all':'Tick all';
+      toggleBtn.disabled=posting||done;
+      notesList.querySelectorAll('input').forEach(c=>{ c.disabled=posting||done; });
     }
 
     function renderRows(){
       notesList.innerHTML='';
       for(const n of full){
-        const li=document.createElement('li');
-        const label=document.createElement('label');
+        const li=mk('li','cw-pc-row cw-pc-note'+(excluded.has(n.id)?' off':''));
+        const label=mk('label','cw-pc-h');
         const cb=document.createElement('input'); cb.type='checkbox'; cb.checked=!excluded.has(n.id);
         cb.addEventListener('change',()=>{
           if(cb.checked) excluded.delete(n.id); else excluded.add(n.id);
-          preview(true);
+          li.classList.toggle('off',!cb.checked); syncSend();
         });
-        const w=document.createElement('span'); w.className='hr-comments-where';
         const parent=n.reply_to&&state.notes.find(x=>x.id===n.reply_to);
-        w.textContent=(n.reply_to?(parent&&parent.author?'reply to '+parent.author:'reply')+' at ':'')+where(n);
-        label.append(cb,w);
-        const pre=document.createElement('pre'); pre.textContent=firstLine(n.body);
-        li.append(label,pre);
+        const st=mk('span','cw-pc-st'); slots.set('note:'+n.id,st);
+        label.append(cb,mk('span','cw-pc-where',(n.reply_to?(parent&&parent.author?'reply to '+parent.author:'reply')+' at ':'')+where(n)),st);
+        const body=mk('div','cw-pc-body'); body.append(mdEl(n.body));
+        li.append(label,body);
         notesList.appendChild(li);
       }
+      syncSend();
     }
 
     function renderRest(data){
       resolvesList.innerHTML='';
-      for(const r of data.resolves||[]){
-        const li=document.createElement('li');
-        const w=document.createElement('div'); w.className='hr-comments-where';
-        w.textContent='resolve thread at '+where(r);
-        const pre=document.createElement('pre'); pre.textContent=firstLine(r.body);
-        li.append(w,pre);
+      const rs=data.resolves||[], ir=data.in_review||[];
+      for(const r of rs){
+        const li=mk('li','cw-pc-row'), h=mk('div','cw-pc-h'), st=mk('span','cw-pc-st');
+        slots.set('resolve:'+r.thread_id,st);
+        h.append(mk('span','cw-pc-where','resolve thread at '+where(r)),st);
+        li.append(h,mk('div','cw-pc-body',firstLine(r.body)));
         resolvesList.appendChild(li);
       }
+      resolvesSec.hidden=!rs.length; resolvesHead.textContent='Resolves on submit · '+rs.length;
       inReviewList.innerHTML='';
-      for(const n of data.in_review||[]){
-        const li=document.createElement('li');
-        li.textContent='already in your pending review: '+where(n)+' '+firstLine(n.body);
+      for(const n of ir){
+        const li=mk('li','cw-pc-row');
+        li.append(mk('div','cw-pc-h'),mk('div','cw-pc-body',firstLine(n.body)));
+        li.firstChild.append(mk('span','cw-pc-where',where(n)));
         inReviewList.appendChild(li);
       }
+      inReviewSec.hidden=!ir.length; inReviewHead.textContent='Already in your pending review · '+ir.length;
       review=data.review||{pending:false,comments:0};
       pendingNote.hidden=!review.pending;
       pendingNote.textContent='You already have a pending review on GitHub with '+review.comments
         +' comments. They will be submitted with this review.';
-      const own=data.own_pr===true;
+      own=data.own_pr===true;
       const approve=evRadios.find(r=>r.value==='APPROVE');
       approve.disabled=own;
-      approveNote.hidden=!own;
-      approveNote.textContent=own?"You can't approve your own pull request.":'';
       if(own&&approve.checked) evRadios[0].checked=true;
     }
 
@@ -3614,7 +3679,7 @@ if(window.CW_LIVE){
     function preview(narrow){
       const mine=++seq;
       loading=true; syncSend();
-      status.textContent='Loading…';
+      say('Checking GitHub…',false,true);
       const req={resolve:[...pendingResolveSet]};
       if(narrow) req.ids=selectedIds();
       return fetch(window.CW_LIVE.api+'/post/preview',{
@@ -3623,33 +3688,40 @@ if(window.CW_LIVE){
         .then(({ok,body})=>{
           if(mine!==seq) return;
           loading=false;
-          if(!ok){ nonce=null; status.textContent=errText(body); syncSend(); return; }
-          status.textContent='';
+          if(!ok){ nonce=null; waiting=false; actionsEl.hidden=false; say(errText(body),true); syncSend(); return; }
+          say('');
           actionsEl.hidden=false;
           resetLocal(body.reset);
           nonce=body.nonce; lastResolves=body.resolves||[];
-          if(!narrow){ full=body.notes||[]; excluded.clear(); renderRows(); }
+          if(!narrow){
+            const old=excluded;
+            full=body.notes||[]; excluded=new Set(full.filter(n=>old.has(n.id)).map(n=>n.id)); renderRows();
+          }
+          nonceIds=new Set(narrow?req.ids:full.map(n=>n.id));
           renderRest(body);
           syncSend();
+          if(waiting){ waiting=false; submit(); }
         })
         .catch(()=>{
           if(mine!==seq) return;
-          loading=false; nonce=null;
-          status.textContent='Request failed -- check the daemon is still running.';
+          loading=false; nonce=null; waiting=false; actionsEl.hidden=false;
+          say('Request failed -- check the daemon is still running.',true);
           syncSend();
         });
     }
 
     function resetDialog(){
-      excluded=new Set(); full=[]; nonce=null; done=false; posting=false;
-      progress=new Map(); itemsList.innerHTML=''; partial.hidden=true; actionsEl.hidden=false; status.textContent='';
-      notesList.innerHTML=''; resolvesList.innerHTML=''; inReviewList.innerHTML='';
-      pendingNote.hidden=true; approveNote.hidden=true;
+      seq++; loading=false; waiting=false;
+      excluded=new Set(); nonce=null; nonceIds=null; lastResolves=[]; review={pending:false,comments:0}; own=false;
+      done=false; posting=false; slots.clear();
+      partial.hidden=true; actionsEl.hidden=false; say('');
+      resolvesList.innerHTML=''; inReviewList.innerHTML='';
+      resolvesSec.hidden=true; inReviewSec.hidden=true; pendingNote.hidden=true;
       evRadios.forEach(r=>{ r.checked=r.value==='COMMENT'; r.disabled=false; });
-      summary.value=''; options.open=false; cancelBtn.textContent='Cancel';
-      const pr=state.meta&&state.meta.pr;
-      titleEl.textContent=pr!=null?'Submit review on #'+pr:'Submit review';
-      syncSend();
+      summary.value=''; cancelBtn.textContent='Cancel';
+      const m=state.meta||{};
+      titleEl.textContent=m.pr!=null?'Submit review on #'+m.pr:'Submit review';
+      full=localDrafts(); renderRows();
     }
 
     function start(from){
@@ -3670,6 +3742,11 @@ if(window.CW_LIVE){
 
     evRadios.forEach(r=>r.addEventListener('change',syncSend));
     summary.addEventListener('input',syncSend);
+    toggleBtn.addEventListener('click',()=>{
+      if(posting||done) return;
+      excluded=selectedIds().length===full.length?new Set(full.map(n=>n.id)):new Set();
+      renderRows();
+    });
     const closeIdle=()=>{ if(!posting) dlg.close(); };
     close.addEventListener('click',closeIdle);
     cancelBtn.addEventListener('click',closeIdle);
@@ -3677,37 +3754,36 @@ if(window.CW_LIVE){
     backdropClose(dlg,closeIdle);
     dlg.addEventListener('cancel',e=>{ if(posting) e.preventDefault(); });
     dlg.addEventListener('close',()=>{
+      seq++; loading=false; waiting=false;
       const o=opener&&opener.isConnected&&!opener.hidden&&!opener.disabled&&opener.offsetParent!==null?opener
         :document.getElementById('hr-comments-btn')||document.body;
       o.focus();
     });
 
-    function setRow(key,text){
-      let li=progress.get(key);
-      if(!li){ li=document.createElement('li'); progress.set(key,li); itemsList.appendChild(li); }
-      li.textContent=text;
+    function setRow(key,text,cls){
+      const s=slots.get(key);
+      if(s){ s.textContent=text; s.className='cw-pc-st'+(cls?' '+cls:''); s.title=cls==='bad'?text:''; }
     }
-    const rowText=(label,item,okText)=>(item.ok?'✓ ':'✗ ')+label+(item.ok?' '+okText:': '+(item.error||'failed'));
+    const clearSlots=()=>slots.forEach((_,k)=>setRow(k,''));
 
     window.__cwOnPosted=item=>{
       if(!item) return;
+      const bad=item.ok?'':'✗ '+(item.error||'failed');
       if(item.kind==='note'){
-        const n=full.find(x=>x.id===item.id);
-        setRow('note:'+item.id,rowText(n?where(n):item.id,item,'in your pending review'));
+        setRow('note:'+item.id,item.ok?'✓ posted':bad,item.ok?'ok':'bad');
         const mine=state.notes.find(x=>x.id===item.id);
         if(item.ok&&mine&&mine.state==='draft'){ mine.state='in_review'; persistLocal(); renderNotes(); }
       } else if(item.kind==='submit'){
-        setRow('submit',rowText('submit review'+(item.event?' ('+item.event+')':''),item,'done'));
+        say(item.ok?'✓ submit review'+(item.event?' ('+item.event+')':'')+' done':bad,!item.ok);
       } else if(item.kind==='resolve'){
-        const r=lastResolves.find(x=>x.thread_id===item.id);
-        setRow('resolve:'+item.id,rowText(r?'resolve '+where(r):'resolve '+item.id,item,'resolved'));
+        setRow('resolve:'+item.id,item.ok?'✓ resolved':bad,item.ok?'ok':'bad');
       }
     };
 
     function prefillRows(){
-      progress=new Map(); itemsList.innerHTML='';
-      for(const n of full) if(!excluded.has(n.id)) setRow('note:'+n.id,'… '+where(n));
-      for(const r of lastResolves) setRow('resolve:'+r.thread_id,'… resolve '+where(r));
+      clearSlots();
+      for(const n of full) if(!excluded.has(n.id)) setRow('note:'+n.id,'… posting');
+      for(const r of lastResolves) setRow('resolve:'+r.thread_id,'… posting');
     }
 
     function clearResolved(body){
@@ -3718,7 +3794,7 @@ if(window.CW_LIVE){
     function finish(body){
       if(body.ok){
         clearResolved(body);
-        done=true; status.textContent='Review submitted.'; cancelBtn.textContent='Close';
+        done=true; say('Review submitted.'); cancelBtn.textContent='Close';
       } else if(body.partial){
         clearResolved(body);
         const kindOf=id=>((body.results||[]).find(r=>r.id===id)||{}).kind;
@@ -3737,30 +3813,30 @@ if(window.CW_LIVE){
         failedNoteIds=failedNotes.map(f=>f.id);
         nowBtn.textContent='Submit the '+n+' now';
         retryBtn.onclick=k?retry:submitNow;
-        partial.hidden=false; actionsEl.hidden=true; status.textContent='';
+        partial.hidden=false; actionsEl.hidden=true; say('');
         syncSend();
         return;
       } else {
         clearResolved(body);
-        done=true; status.textContent=body.render_error||body.error||'Posted with errors.';
+        done=true; say(body.render_error||body.error||'Posted with errors.',true);
       }
       partial.hidden=true; syncSend();
     }
 
     function postJson(payload){
       posting=true; syncSend();
-      status.textContent='Posting…';
+      say('Posting…',false,true);
       return fetch(window.CW_LIVE.api+'/post',{
         method:'POST',headers:headers(),body:JSON.stringify(payload),
       }).then(r=>r.json().then(body=>({ok:r.ok,status:r.status,body})))
         .then(({ok,status:code,body})=>{
           posting=false;
           if(!ok){
-            progress=new Map(); itemsList.innerHTML='';
-            status.textContent=errText(body);
+            clearSlots();
+            say(errText(body),true);
             if(code===409&&body.error==='changed since preview'){
               partial.hidden=true;
-              preview(false).then(()=>{ if(nonce!=null) status.textContent='The list changed since you opened this; review it again.'; });
+              preview(false).then(()=>{ if(nonce!=null) say('The list changed since you opened this; review it again.'); });
             }
             syncSend();
             return;
@@ -3769,14 +3845,25 @@ if(window.CW_LIVE){
         })
         .catch(()=>{
           posting=false;
-          progress=new Map(); itemsList.innerHTML='';
-          status.textContent='Request failed -- check the daemon is still running.';
+          clearSlots();
+          say('Request failed -- check the daemon is still running.',true);
           syncSend();
         });
     }
 
+    function submit(){
+      if(sendBtn.disabled) return;
+      if(loading){ waiting=true; say('Waiting for GitHub…',false,true); return; }
+      if(covered()) return send();
+      return preview(true).then(()=>{ if(nonce!=null&&!posting) send(); });
+    }
+    function covered(){
+      const sel=selectedIds();
+      return nonce!=null&&nonceIds&&sel.length===nonceIds.size&&sel.every(id=>nonceIds.has(id));
+    }
     function send(){
       if(nonce==null) return;
+      if(!covered()) return submit();
       partial.hidden=true; prefillRows();
       return postJson({nonce,resolve:[...pendingResolveSet],ids:selectedIds(),
         event:selEvent(),body:summary.value});
@@ -3795,7 +3882,7 @@ if(window.CW_LIVE){
       partial.hidden=true;
       return postJson({submit_only:true,event:selEvent(),body:summary.value,resolve:[...pendingResolveSet]});
     }
-    sendBtn.addEventListener('click',send);
+    sendBtn.addEventListener('click',submit);
     nowBtn.addEventListener('click',submitNow);
     updatePanelSubmit();
   }
@@ -4302,6 +4389,19 @@ if(window.CW_LIVE){
     const streams=new Map();         // qid -> {seq,text,progress}
     const outcomesByQid=new Map();   // qid -> Map(oid -> folded outcome record)
     const streamElsOf=qid=>[...document.querySelectorAll('.cw-streaming')].filter(e=>e.dataset.qid===qid);
+    function paintStream(e,text){
+      e.replaceChildren(mdEl(text));
+      const c=mk('span','cw-caret'); c.setAttribute('aria-hidden','true');
+      (e.lastElementChild&&/^(P|H4|H5)$/.test(e.lastElementChild.tagName)?e.lastElementChild:e).append(c);
+    }
+    const dirtyStreams=new Set();
+    function scheduleStream(qid){
+      if(!dirtyStreams.size) requestAnimationFrame(()=>{
+        const q=[...dirtyStreams]; dirtyStreams.clear();
+        for(const id of q){ const st=streams.get(id); if(st) streamElsOf(id).forEach(e=>paintStream(e,st.text)); }
+      });
+      dirtyStreams.add(qid);
+    }
     const progressElsOf=qid=>[...document.querySelectorAll('.cw-progress')].filter(e=>e.dataset.qid===qid);
     function progressText(p){
       if(!p) return '';
@@ -5042,10 +5142,9 @@ if(window.CW_LIVE){
       d.append(q);
       if(r.status==='pending'){
         const st=streams.get(r.qid)||{};
-        const live=mk('p','cw-turn-a cw-streaming');
+        const live=mk('div','cw-turn-a cw-md cw-streaming');
         live.dataset.qid=r.qid; live.setAttribute('aria-live','off');
-        live.append(mk('span','cw-stream-text',st.text||''),mk('span','cw-caret'));
-        live.lastChild.setAttribute('aria-hidden','true');
+        paintStream(live,st.text||'');
         const p=mk('p','cw-turn-a cw-working');
         const dots=mk('span','cw-dots'); dots.setAttribute('aria-hidden','true');
         for(let i=0;i<3;i++) dots.appendChild(document.createElement('i'));
@@ -5679,7 +5778,7 @@ if(window.CW_LIVE){
       if(typeof d.seq==='number'&&d.seq<=st.seq) return;
       st.seq=d.seq; st.text+=d.text||'';
       const els=streamElsOf(d.qid);
-      if(els.length) els.forEach(e=>{ e.firstChild.textContent=st.text; });
+      if(els.length) scheduleStream(d.qid);
       else { const t=threads.get(d.thread_id); if(t&&t.el&&t.el.isConnected) renderThread(t); }
     };
     window.__cwOnProgress=d=>{
