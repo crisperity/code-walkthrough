@@ -9,6 +9,7 @@ Usage:
   cw_mcp.py runner --dir D --qid Q --worktree W --timeout S  code task run_check server
   cw_mcp.py check
   cw_mcp.py stop
+  cw_mcp.py open [--print]            start the daemon if needed and open the index
 
 Stdlib only. Logging goes to stderr; stdout carries only JSON-RPC replies.
 """
@@ -926,6 +927,18 @@ def cmd_stop():
     return 0
 
 
+def cmd_open(print_only=False):
+    info = ensure_server()
+    url = f"http://127.0.0.1:{info['port']}/walkthrough?k={info['token']}"
+    if print_only:
+        print(url)
+        return 0
+    import webbrowser
+    if not webbrowser.open(url):
+        print(url)
+    return 0
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     parser = argparse.ArgumentParser(prog="cw_mcp.py")
@@ -944,6 +957,8 @@ def main(argv=None):
     runner_parser.add_argument("--timeout", type=int, default=300)
     sub.add_parser("check")
     sub.add_parser("stop")
+    open_parser = sub.add_parser("open")
+    open_parser.add_argument("--print", dest="print_only", action="store_true")
     args = parser.parse_args(argv)
 
     if args.cmd in (None, "mcp"):
@@ -958,6 +973,8 @@ def main(argv=None):
         return cmd_check()
     if args.cmd == "stop":
         return cmd_stop()
+    if args.cmd == "open":
+        return cmd_open(args.print_only)
     parser.print_help()
     return 2
 

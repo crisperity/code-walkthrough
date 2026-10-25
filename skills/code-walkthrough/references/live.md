@@ -63,6 +63,29 @@ turns a usage total into `cost_usd`; no price table ships, since one would go st
 access may be offered (`trust.repos` also lets a repo clone without asking), see "Full access" and "Repos without a
 local clone". `repos` maps `owner/name` to an existing absolute directory and wins over the cache.
 
+## Index, switcher, installing as an app
+
+`/walkthrough` is the index: every walkthrough the daemon knows, newest first, stacked PRs grouped.
+The box at the top finds walkthroughs as you type. Paste a PR link, an `a..b` or `a...b` range or a
+commit to start one; an existing walkthrough for that target is offered first. ⌘/Ctrl+Enter
+rebuilds it in place, keeping threads and notes. Inside a walkthrough page, ⌘K or Ctrl+K opens the
+same palette and `[` and `]` step through the stack.
+
+The daemon listens on port 27183 by default so bookmarks and an installed app keep working across
+restarts; set `"port"` in `config.json` to change it. If that port is taken it tries the previous
+port from `server.json`, then a random one, and logs the fallback to `server.log`. The first page
+load with a valid `?k=` sets an HttpOnly `cw_k` cookie (one year, `SameSite=Strict`) that
+authorizes later page and event GETs without the token in the URL. Every POST still needs the
+`X-CW-Token` header. Accepted risk: the cookie is not scoped to a port, so other servers on
+127.0.0.1 see it, and anyone who grabs the port while the daemon is down gets it on the next visit.
+Processes of the same user can already read the token file.
+
+The daemon exits after 45 minutes idle (`CW_IDLE_S`, in seconds). `cw_mcp.py open` starts it again
+and opens the index; `--print` only prints the URL.
+
+To install: open the index in Chrome or Edge, then ⋮ → Install (or the install icon in the address
+bar). While the daemon is down the app shows an offline page; run `cw_mcp.py open` to bring it back.
+
 ## `check`
 
 ```bash
