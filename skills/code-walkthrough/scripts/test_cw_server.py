@@ -3,9 +3,11 @@
 Daemon runs in-process on an ephemeral port and is always stopped in a finally block, so no
 test leaks a thread or a bound socket."""
 
+import http.client
 import json
 import os
 import socket
+import subprocess
 import sys
 import tempfile
 import threading
@@ -138,7 +140,17 @@ def test_injection_round_trip():
                 html[html.index("<script>window.CW_LIVE="):html.index("</script>") + len("</script>")], ""
             )
             on_disk = (d / "my-slug.html").read_text()
-            assert stripped == on_disk
+            assert stripped == cw_server._splice_nav(on_disk)
+
+
+def test_splice_nav_leaves_placeholder_text_in_walkthrough_body():
+    page = ('<html><head><title>t</title></head><body><pre>CW_FAVICON_HREF <!-- CW_NAV --> rel="icon"</pre>'
+            '</body></html>')
+    out = cw_server._splice_nav(page)
+    assert "<pre>CW_FAVICON_HREF <!-- CW_NAV --> rel=\"icon\"</pre>" in out
+    assert out.index(cw_server._FAVICON_LINK) < out.index("</head>")
+    assert out.count('<link rel="icon"') == 1 and out.count(cw_server._NAV_OPEN) == 1
+    assert out.index(cw_server._NAV_OPEN) > out.index("</pre>")
 
 
 def test_page_route_mermaid():
@@ -159,7 +171,7 @@ def test_page_route_mermaid():
             (d / "my-slug.html").write_text(spliced)
             status, body = _request(daemon, "GET", url)
             assert status == 200, status
-            assert len(body) < 10_000
+            assert len(body) < 100_000
             assert b"<script>var m=1;</script>" in body
 
 
@@ -262,6 +274,7 @@ def test_drafts_survive_restart_on_new_port():
         cw_store.write_json(d / "page-notes.json", {"notes": [
             {"id": "n1", "origin": "local", "state": "draft", "text": "still here"}
         ]})
+        cw_store.write_json(cw_store.config_path(), {"port": _free_port()})
         daemon = cw_server.Daemon(write_server_json=True)
         daemon.start()
         held_port = daemon.port
@@ -284,6 +297,114 @@ def test_drafts_survive_restart_on_new_port():
                 daemon2.stop()
         finally:
             blocker.close()
+
+
+# -- stable port ------------------------------------------------------------
+
+def _free_port():
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def test_configured_port_used_when_free_else_random_fallback():
+    with cw_testlib.temp_home():
+        port = _free_port()
+        cw_store.write_json(cw_store.config_path(), {"port": port})
+        daemon = cw_server.Daemon(write_server_json=True).start()
+        try:
+            assert daemon.port == port
+        finally:
+            daemon.stop()
+
+        blocker = socket.socket()
+        blocker.bind(("127.0.0.1", port))
+        blocker.listen(1)
+        try:
+            daemon = cw_server.Daemon(write_server_json=True).start()
+            try:
+                assert daemon.port != port
+            finally:
+                daemon.stop()
+        finally:
+            blocker.close()
+
+
+# -- cookie auth -------------------------------------------------------------
+
+def test_pwa_routes_serve_manifest_icons_and_sw_on_host_check_only():
+    paths = {"/manifest.webmanifest": "application/manifest+json", "/icon.svg": "image/svg+xml",
+             "/icon-maskable.svg": "image/svg+xml", "/sw.js": "text/javascript"}
+    with running_daemon() as daemon:
+        got = {}
+        for path, ctype in paths.items():
+            conn = http.client.HTTPConnection("127.0.0.1", daemon.port, timeout=5)
+            try:
+                conn.request("GET", path)
+                resp = conn.getresponse()
+                got[path] = resp.read()
+                assert resp.status == 200 and resp.getheader("Content-Type") == ctype, path
+            finally:
+                conn.close()
+            assert _request(daemon, "GET", path, host="evil.example:1")[0] == 403, path
+        m = json.loads(got["/manifest.webmanifest"])
+        assert (m["id"], m["start_url"], m["scope"], m["display"]) == ("/walkthrough", "/walkthrough", "/", "standalone")
+        assert (m["name"], m["short_name"]) == ("code-walkthrough", "Walkthroughs")
+        assert m["background_color"] == m["theme_color"] == "#0f1115"
+        assert [(i["src"], i["purpose"]) for i in m["icons"]] == [("/icon.svg", "any"), ("/icon-maskable.svg", "maskable")]
+        assert b"#7aa2f7" in got["/icon.svg"] and b"#7aa2f7" in got["/icon-maskable.svg"]
+        cw_testlib.require_node()
+        proc = subprocess.run(["node", "-e", "new (require('vm').Script)(require('fs').readFileSync(0,'utf8'))"],
+                              input=got["/sw.js"], capture_output=True, timeout=30)
+        assert proc.returncode == 0, proc.stderr
+
+
+def test_page_k_sets_cookie_and_cookie_alone_authorizes_gets_only():
+    with cw_testlib.temp_home() as home:
+        _make_walkthrough(home)
+        with running_daemon() as daemon:
+            page = f"/walkthrough/{KEY}/{WID}/"
+            name = f"cw_k_{daemon.port}"
+            conn = http.client.HTTPConnection("127.0.0.1", daemon.port, timeout=5)
+            try:
+                conn.request("GET", f"{page}?k={daemon.token}")
+                resp = conn.getresponse()
+                resp.read()
+                cookie = resp.getheader("Set-Cookie")
+            finally:
+                conn.close()
+            assert resp.status == 200
+            assert cookie.startswith(f"{name}={daemon.token};"), cookie
+            for attr in ("HttpOnly", "SameSite=Strict", "Path=/"):
+                assert attr in cookie, (attr, cookie)
+            assert "Max-Age" not in cookie and "Expires" not in cookie
+
+            good = {"Cookie": f"{name}={daemon.token}"}
+            status, _ = _request(daemon, "GET", page, headers=good)
+            assert status == 200
+            for bad in (f"{name}=wrong", f"cw_k={daemon.token}", "garbage", name, f'{name}="', f"{name}=\xe9"):
+                status, _ = _request(daemon, "GET", page, headers={"Cookie": bad})
+                assert status == 403, bad
+            status, _ = _request(daemon, "GET", page, headers=good, host="evil.example:1")
+            assert status == 403
+            body = json.dumps({"tool": "walkthrough_list", "args": {}})
+            status, _ = _request(daemon, "POST", "/api/rpc", headers=good, body=body)
+            assert status == 403
+            notes = f"/api/walkthrough/{KEY}/{WID}/notes"
+            assert _request(daemon, "PUT", notes, token="\xe9", body="{}")[0] == 403
+            assert _request(daemon, "PUT", notes, headers=good, body="{}")[0] == 403
+
+
+def test_invalid_or_unpersisted_configured_port_falls_back():
+    free = _free_port()
+    for bad, persist in (("27183", True), (True, True), (70000, True), (free, False)):
+        with cw_testlib.temp_home():
+            cw_store.write_json(cw_store.config_path(), {"port": bad})
+            daemon = cw_server.Daemon(write_server_json=persist).start()
+            try:
+                assert daemon.port not in (bad, 27183)
+            finally:
+                daemon.stop()
 
 
 # -- SSE -------------------------------------------------------------------
@@ -1280,3 +1401,208 @@ def test_trust_route_write_failure_is_400_with_remedy():
         with running_daemon() as daemon, mock.patch.object(cw_store, "write_json", side_effect=PermissionError("/x")):
             status, body = _post(daemon, path, {"scope": "repo", "action": "add"})
             assert status == 400 and body["error"] == "could not write config.json" and body["remedy"]
+
+
+# -- index API ----------------------------------------------------------------
+
+def _pr_walkthrough(home, key, wid, pr, repo, **fields):
+    d, _ = _make_walkthrough(home, key=key, wid=wid)
+    _set_meta(d, pr=pr, gh_repo="o/r", repo=repo, title=f"AB-{pr} t", **fields)
+    return d
+
+
+def _get_json(daemon, path, **kw):
+    status, data = _request(daemon, "GET", path, **kw)
+    return status, json.loads(data)
+
+
+def test_api_walkthroughs_list_resolve_and_auth():
+    with cw_testlib.temp_home() as home:
+        _pr_walkthrough(home, "r-aaaaaa", "pr-7-aaaa", 7, "/w/a")
+        _pr_walkthrough(home, "r-bbbbbb", "pr-8-bbbb", 8, "/w/b", status="failed")
+        with running_daemon() as daemon:
+            k = f"?k={daemon.token}"
+            status, body = _get_json(daemon, f"/api/walkthroughs{k}")
+            assert status == 200 and body["counts"] == {"all": 2, "building": 0, "done": 1, "failed": 1}
+            assert {r["id"]: r["url"] for r in body["rows"]} == {
+                "pr-7-aaaa": "/walkthrough/r-aaaaaa/pr-7-aaaa/", "pr-8-bbbb": "/walkthrough/r-bbbbbb/pr-8-bbbb/"}
+            assert body["rows"][0]["label"] and "bucket" in body["rows"][0]
+
+            q = "q=" + "https://github.com/o/r/pull/7"
+            assert _get_json(daemon, f"/api/walkthroughs/resolve?{q}", token=daemon.token)[1]["matches"][0]["url"] \
+                == "/walkthrough/r-aaaaaa/pr-7-aaaa/"
+            cookie = {"Cookie": f"cw_k_{daemon.port}={daemon.token}"}
+            status, body = _get_json(daemon, f"/api/walkthroughs/resolve?{q.replace('7', '9')}", headers=cookie)
+            assert status == 200 and body["kind"] == "pr" and body["label"] == "o/r#9" and body["matches"] == []
+            assert {r["repo"] for r in body["repos"]} == {"/w/a", "/w/b"}
+            status, body = _get_json(daemon, "/api/walkthroughs/resolve?q=sovrn", headers=cookie)
+            assert body == {"kind": None, "label": None, "matches": [], "repos": []}
+
+            for path, kw in (("/api/walkthroughs", {}), ("/api/walkthroughs?k=bad", {}),
+                             ("/api/walkthroughs/resolve?q=x", {"headers": {"Cookie": f"cw_k_{daemon.port}=bad"}}),
+                             (f"/api/walkthroughs{k}", {"host": "evil.example:1"}),
+                             (f"/api/walkthroughs{k}", {"origin": "http://evil.example"})):
+                assert _request(daemon, "GET", path, **kw)[0] == 403, (path, kw)
+            assert _request(daemon, "GET", "/api/walkthroughs", token=daemon.token)[0] == 200
+
+            status, body = _request(daemon, "GET", "/walkthrough")
+            assert status == 403 and b"cw_mcp.py open" in body
+            assert _request(daemon, "GET", f"/walkthrough{k}", host="evil.example:1")[0] == 403
+
+
+class CapturingRunner:
+    def __init__(self):
+        self.params = []
+
+    def prepare_walkthrough(self, params, is_running=lambda d: False, edit_guard=None):
+        self.params.append(params)
+        d = cw_store.walkthrough_dir("r-cccccc", "pr-5-cccc", create=True)
+        return d, {"key": "r-cccccc", "id": "pr-5-cccc", "status": "done"}, True
+
+    def run(self, d, on_event):
+        pass
+
+
+def _start(daemon, body, **kw):
+    kw.setdefault("token", daemon.token)
+    status, data = _request(daemon, "POST", "/api/walkthroughs/start", body=json.dumps(body), **kw)
+    return status, json.loads(data)
+
+
+def test_api_walkthroughs_start_builds_args_for_pr_range_commit():
+    with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
+        repo, base_sha, head_sha = cw_testlib.make_repo(tmp, {"a": "1"}, {"a": "2"})
+        _pr_walkthrough(home, "r-aaaaaa", "pr-7-aaaa", 7, str(repo))
+        fake = CapturingRunner()
+        cw_server.runner = fake
+        try:
+            with cw_testlib.fake_gh(tmp, pr_info={"baseRefName": "dev", "headRefName": "feat", "headRefOid": "b" * 40,
+                                                  "title": "AB-9 x", "isCrossRepository": True}), \
+                    running_daemon() as daemon:
+                status, body = _start(daemon, {"input": "https://github.com/o/r/pull/9/files", "repo": "o/r",
+                                               "clone": True, "fresh": True}, origin=f"http://127.0.0.1:{daemon.port}")
+                assert status == 200 and body == {"ok": True, "result": {
+                    "url": "/walkthrough/r-cccccc/pr-5-cccc/", "reused": True, "id": "pr-5-cccc",
+                    "key": "r-cccccc", "status": "done"}}
+                assert fake.params[-1] == {"repo": "o/r", "base": "origin/dev", "head": "b" * 40, "pr": 9,
+                                           "target": "https://github.com/o/r/pull/9", "slug": "pr-9", "title": "AB-9 x",
+                                           "clone": True, "fresh": True}
+                # no repo given: the known checkout of o/r is the default
+                _pr_walkthrough(home, "r-dddddd", "pr-3-dddd", 3, "/not/a/real/checkout")
+                status, body = _start(daemon, {"input": f"{base_sha[:8]}"})
+                assert status == 200 and body["ok"], body
+                assert fake.params[-1]["base"] == f"{base_sha[:8]}^" and fake.params[-1]["head"] == base_sha[:8]
+                status, body = _start(daemon, {"input": "main...feat", "repo": str(repo)})
+                assert fake.params[-1] == {"repo": str(repo), "base": "main", "head": "feat", "target": "main...feat",
+                                           "slug": "main...feat"}
+        finally:
+            cw_server.runner = None
+
+
+def test_api_walkthroughs_start_guards_and_errors():
+    with cw_testlib.temp_home():
+        fake = CapturingRunner()
+        cw_server.runner = fake
+        try:
+            with running_daemon() as daemon:
+                good = {"input": "abc1234", "repo": "/w/x"}
+                cookie = {"Cookie": f"cw_k_{daemon.port}={daemon.token}"}
+                assert _start(daemon, good, token=None, headers=cookie)[0] == 403
+                assert _start(daemon, good, token="bad")[0] == 403
+                assert _start(daemon, good, origin="http://evil.example")[0] == 403
+                assert _start(daemon, good, host="evil.example:1")[0] == 403
+                assert not fake.params
+                status, body = _start(daemon, {"input": "sovrn"})
+                assert status == 200 and body["ok"] is False and body["remedy"] and "error" in body
+                status, body = _start(daemon, {"input": "https://github.com/o/r/pull/9"})
+                assert body["ok"] is False and not fake.params
+        finally:
+            cw_server.runner = None
+
+
+def test_walkthrough_list_keeps_old_fields_and_adds_index():
+    with cw_testlib.temp_home() as home:
+        _make_walkthrough(home)
+        with running_daemon() as daemon:
+            status, body = _rpc(daemon, "walkthrough_list", {})
+            assert status == 200
+            res = body["result"]
+            assert set(res["walkthroughs"][0]) == {"id", "key", "repo", "target", "status", "updated_at", "url"}
+            assert res["walkthroughs"][0]["url"].endswith(f"/walkthrough/{KEY}/{WID}/?k={daemon.token}")
+            assert res["index"] == f"http://127.0.0.1:{daemon.port}/walkthrough?k={daemon.token}"
+
+
+# -- index page and nav splice ------------------------------------------------
+
+def _node_parses(scripts):
+    cw_testlib.require_node()
+    check = ("const vm=require('vm');JSON.parse(require('fs').readFileSync(0,'utf8')).forEach((src,i)=>{"
+             "try{new vm.Script(src)}catch(e){console.error('script '+i+': '+e);process.exit(1)}})")
+    proc = subprocess.run(["node", "-e", check], input=json.dumps(scripts), capture_output=True,
+                          text=True, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+
+
+def _live_blob(html):
+    return json.loads(html.split("window.CW_LIVE=", 1)[1].split(";</script>", 1)[0])
+
+
+def test_index_page_sets_cookie_splices_nav_once_and_parses():
+    import re
+    with cw_testlib.temp_home():
+        with running_daemon() as daemon:
+            conn = http.client.HTTPConnection("127.0.0.1", daemon.port, timeout=5)
+            try:
+                conn.request("GET", f"/walkthrough?k={daemon.token}")
+                resp = conn.getresponse()
+                html = resp.read().decode()
+                cookie = resp.getheader("Set-Cookie")
+            finally:
+                conn.close()
+            assert resp.status == 200 and cookie.startswith(f"cw_k_{daemon.port}=") and "HttpOnly" in cookie
+            assert '<link rel="manifest" href="/manifest.webmanifest">' in html
+            assert html.count("window.CWNav=") == 1 and html.count("<style>") == 2
+            for placeholder in ("<!-- CW_NAV -->", "CW_FAVICON_HREF"):
+                assert placeholder not in html
+            assert 'rel="icon" href="data:image/svg+xml;base64,' in html
+            assert _live_blob(html) == {"token": daemon.token, "nav": None}
+            _node_parses(re.findall(r"<script>(.*?)</script>", html, re.S))
+            assert _request(daemon, "GET", "/walkthrough/", headers={"Cookie": f"cw_k_{daemon.port}={daemon.token}"})[0] == 200
+
+
+def _stack_walkthrough(home, pr, base_ref, head_ref):
+    d, _ = _make_walkthrough(home, key=f"r-{pr:06d}", wid=f"pr-{pr}-aaaa")
+    _set_meta(d, pr=pr, gh_repo="o/r", repo="/w/a", title=f"AB-{pr} t", base_ref=base_ref, head_ref=head_ref,
+              base=f"{pr}0" * 4, head=f"{pr}1" * 4)
+    return d
+
+
+def test_walkthrough_page_gets_stack_nav_spliced_once():
+    with cw_testlib.temp_home() as home:
+        for pr, base, head in ((59, "dev", "AO-149"), (60, "AO-149", "AO-150"), (61, "AO-150", "AO-151")):
+            _stack_walkthrough(home, pr, base, head)
+        with running_daemon() as daemon:
+            status, body = _request(daemon, "GET", f"/walkthrough/r-000060/pr-60-aaaa/?k={daemon.token}")
+            html = body.decode()
+            nav = _live_blob(html)["nav"]
+            assert status == 200 and (nav["pos"], nav["n"]) == (1, 3)
+            assert nav["prev"]["url"] == "/walkthrough/r-000059/pr-59-aaaa"
+            assert nav["next"]["url"] == "/walkthrough/r-000061/pr-61-aaaa"
+            assert html.count("window.CWNav=") == 1 and html.rfind("window.CWNav=") < html.rfind("</body>")
+            assert html.count('rel="icon"') == 1
+
+
+def test_walkthrough_page_without_stack_has_lone_nav():
+    with cw_testlib.temp_home() as home:
+        _make_walkthrough(home)
+        with running_daemon() as daemon:
+            _, body = _request(daemon, "GET", f"/walkthrough/{KEY}/{WID}/?k={daemon.token}")
+            nav = _live_blob(body.decode())["nav"]
+            assert nav["n"] == 1 and nav["prev"] is None and nav["next"] is None
+
+
+def test_static_render_has_no_nav():
+    import test_render as tr
+    order, files = tr.parsed()
+    out = tr.render_html(tr.ANALYSIS, files, tr._real_template(), now=tr.FROZEN, order=order)
+    assert "cwn-" not in out and "CWNav" not in out

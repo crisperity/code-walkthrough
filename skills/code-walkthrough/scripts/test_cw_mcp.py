@@ -652,3 +652,19 @@ def test_page_edit_picture_payload_stores_sanitised_html_and_raises_on_invalid()
         assert "block.html invalid" in str(e)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_open_prints_token_url_only_with_print_or_when_no_browser(monkeypatch, capsys):
+    import webbrowser
+    url = "http://127.0.0.1:27183/walkthrough?k=tok"
+    monkeypatch.setattr(cw_mcp, "ensure_server", lambda: {"port": 27183, "token": "tok"})
+    opened = []
+    launched = [True]
+    monkeypatch.setattr(webbrowser, "open", lambda u: opened.append(u) or launched[0])
+    assert cw_mcp.main(["open", "--print"]) == 0
+    assert capsys.readouterr().out.strip() == url and opened == []
+    assert cw_mcp.main(["open"]) == 0
+    assert opened == [url] and capsys.readouterr().out == ""
+    launched[0] = False
+    assert cw_mcp.main(["open"]) == 0
+    assert capsys.readouterr().out.strip() == url

@@ -306,6 +306,11 @@ argv = sys.argv[1:]
 if argv[:2] == ["api", "user"]:
     _reply("viewer", argv, None, {"login": cfg.get("viewer", "me")})
 
+if argv[:2] == ["pr", "view"] and "baseRefName" in " ".join(argv):
+    _reply("pr-info", argv, None, cfg.get("pr_info") or {
+        "baseRefName": "main", "headRefName": "feat", "headRefOid": "f" * 40, "title": "AB-1 Fake PR",
+        "isCrossRepository": False})
+
 if argv[:2] == ["pr", "view"]:
     _reply("pr-author", argv, None, {"author": {"login": cfg.get("pr_author", "me")}})
 
@@ -795,7 +800,7 @@ def fake_claude(tmp, script, *, auth=None):
 
 @contextmanager
 def fake_gh(tmp, *, comments=(), threads=None, fail_ops=(), sleep=None, pending=None,
-            lose_response_ops=(), fail_nth=None, viewer="me", pr_author="me"):
+            lose_response_ops=(), fail_nth=None, viewer="me", pr_author="me", pr_info=None):
     """A `gh` on PATH that fakes the one REST call and the GraphQL ops notes.py sends,
     dispatched by the mutation/query name parsed from the request body (never from argv --
     see cw_run._gh/_notes: a note's body never reaches a command line). State a call needs
@@ -814,7 +819,8 @@ def fake_gh(tmp, *, comments=(), threads=None, fail_ops=(), sleep=None, pending=
     (root / "threads.json").write_text(json.dumps(threads if threads is not None else []))
     (root / "config.json").write_text(json.dumps({
         "fail_ops": list(fail_ops), "sleep": sleep or {}, "lose_response_ops": list(lose_response_ops),
-        "fail_nth": fail_nth or {}, "viewer": viewer, "pr_author": pr_author}))
+        "fail_nth": fail_nth or {}, "viewer": viewer, "pr_author": pr_author,
+        "pr_info": pr_info}))
     (root / "state.json").write_text(json.dumps({
         "review_opened": pending is not None, "comment_n": 0, "seed": pending or 0}))
     (root / "log.jsonl").write_text("")
@@ -937,7 +943,8 @@ def running_daemon(idle_s=None):
         daemon.stop()
 
 
-def request(daemon, method, path, *, host=None, origin=None, token=None, body=None, timeout=5):
+def request(daemon, method, path, *, host=None, origin=None, token=None, body=None, timeout=5,
+            headers=None):
     conn = http.client.HTTPConnection("127.0.0.1", daemon.port, timeout=timeout)
     try:
         conn.putrequest(method, path, skip_host=True)
@@ -946,6 +953,8 @@ def request(daemon, method, path, *, host=None, origin=None, token=None, body=No
             conn.putheader("Origin", origin)
         if token is not None:
             conn.putheader("X-CW-Token", token)
+        for name, value in (headers or {}).items():
+            conn.putheader(name, value)
         data = body.encode() if isinstance(body, str) else body
         if data is not None:
             conn.putheader("Content-Length", str(len(data)))
