@@ -178,6 +178,10 @@ def test_two_batch_run_through_the_real_daemon():
 
                 # served page minus the injection equals the on-disk partial.html
                 stripped = page_html[:live_blob_start] + page_html[live_blob_end:]
+                stripped = stripped.replace(cw_server._FAVICON_LINK, "", 1)
+                nav = cw_server._NAV_OPEN + cw_server._NAV_HTML + cw_server._NAV_CLOSE
+                assert stripped.count(nav) == 1
+                stripped = stripped.replace(nav, "", 1)
                 on_disk = (d / "partial.html").read_text()
                 if cw_server._MERMAID_PLACEHOLDER in on_disk:
                     payload = cw_server._mermaid_payload()
