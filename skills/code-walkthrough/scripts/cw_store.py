@@ -88,6 +88,7 @@ DEFAULTS = {
     "batch_max_lines": 400,
     "trust": {"repos": [], "orgs": []},
     "repos": {},
+    "port": 27183,
 }
 
 _META_LOCKS = {}

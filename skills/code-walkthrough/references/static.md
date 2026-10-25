@@ -10,6 +10,8 @@ the HTML template never enter your context. The main loop never loads diff hunks
 or per-hunk notes; it may load the verdict, the group titles, and the gate result. The output is
 then assembled by `render.py`, so no subagent writes markup.
 
+Static (`file://`) pages have no index header and no ⌘K switcher; those belong to live mode.
+
 Five terms recur throughout and are defined once, here:
 
 - **`<skill>`**: the code-walkthrough skill dir.

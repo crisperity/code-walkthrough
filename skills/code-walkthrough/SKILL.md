@@ -46,6 +46,8 @@ Success: open `url` with `xdg-open <url>` on Linux, `open <url>` on macOS, `star
 
 In live non-explain mode, after `walkthrough_start` do the ticket lookup of `references/static.md` step 2c (branch name, PR body, commit messages; fetch with your own tools). When a ticket is found, spawn one strong-tier subagent with `prompts/context.md`, the ticket text, `git diff --numstat` and `git diff` of `<base>...<head>` (the refs given to `walkthrough_start`; live mode has no scratchpad diff) and the head sha, then call `walkthrough_reply(id, context=...)` with what it wrote. The daemon already shows the key it spotted as a Context skeleton until that reply lands (the page offers the link form, prefilled, after 120s). A value pasted into the page's empty Context form arrives as a handed task and is handled the same way.
 
+`walkthrough_list` also returns an `index` URL, and `cw_mcp.py open` starts the daemon and opens the index.
+
 Setup, config keys, cost, data egress and the full remedy table: `references/live.md`.
 
 ### Catching up

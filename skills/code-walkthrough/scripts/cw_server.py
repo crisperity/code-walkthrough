@@ -8,8 +8,10 @@ Usage: cw_server.py serve
 Stdlib only. Binds 127.0.0.1 only; see references/live.md for the localhost guard.
 """
 
+import base64
 import contextlib
 import hashlib
+import http.cookies
 import hmac
 import json
 import os
@@ -30,6 +32,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 import cw_agent  # noqa: E402
 import cw_ask  # noqa: E402
+import cw_index  # noqa: E402
 import cw_llm  # noqa: E402
 import cw_repo  # noqa: E402
 import render  # noqa: E402
@@ -47,6 +50,49 @@ START_LOCK = threading.Lock()
 
 _MERMAID_PLACEHOLDER = "<!-- MERMAID_JS -->"
 _mermaid_js = None
+
+
+_ASSETS = Path(__file__).resolve().parent.parent / "assets"
+_MANIFEST = json.dumps({
+    "id": "/walkthrough", "start_url": "/walkthrough", "scope": "/", "display": "standalone",
+    "name": "code-walkthrough", "short_name": "Walkthroughs",
+    "background_color": "#0f1115", "theme_color": "#0f1115",
+    "icons": [
+        {"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"},
+        {"src": "/icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable"},
+    ],
+}).encode()
+_PWA_ASSETS = {
+    "/manifest.webmanifest": ("application/manifest+json", _MANIFEST),
+    "/icon.svg": ("image/svg+xml", (_ASSETS / "icon.svg").read_bytes()),
+    "/icon-maskable.svg": ("image/svg+xml", (_ASSETS / "icon-maskable.svg").read_bytes()),
+    "/sw.js": ("text/javascript", (_ASSETS / "sw.js").read_bytes()),
+}
+
+
+_NAV_PLACEHOLDER = "<!-- CW_NAV -->"
+_FAVICON_PLACEHOLDER = "CW_FAVICON_HREF"
+_NAV_HTML = (_ASSETS / "cw-nav.html").read_text()
+_INDEX_HTML = (_ASSETS / "index-template.html").read_text()
+_FAVICON_HREF = "data:image/svg+xml;base64," + base64.b64encode((_ASSETS / "icon.svg").read_bytes()).decode()
+
+
+_NAV_OPEN, _NAV_CLOSE = "<!-- cw-nav -->", "<!-- /cw-nav -->"
+_FAVICON_LINK = f'<link rel="icon" href="{_FAVICON_HREF}">'
+
+
+def _splice_nav(html, index=False):
+    """Add the shared omnibox/header asset and a favicon. The index template marks the spot with
+    placeholders; walkthrough pages may contain those strings in their code view, so they get the
+    favicon before the first </head> and the nav before the last </body> instead."""
+    nav = _NAV_OPEN + _NAV_HTML + _NAV_CLOSE
+    if index:
+        return html.replace(_FAVICON_PLACEHOLDER, _FAVICON_HREF).replace(_NAV_PLACEHOLDER, nav, 1)
+    h = html.find("</head>")
+    if h >= 0 and 'rel="icon"' not in html[:h]:
+        html = html[:h] + _FAVICON_LINK + html[h:]
+    i = html.rfind("</body>")
+    return html + nav if i < 0 else html[:i] + nav + html[i:]
 
 
 def _mermaid_payload():
@@ -510,26 +556,17 @@ def _tool_walkthrough_list(daemon, args):
     limit = args.get("limit") or 20
     repo = args.get("repo")
     key_filter = cw_store.repo_key(repo) if repo else None
-    root = cw_store.store_root()
-    metas = []
-    if root.exists():
-        for key_dir in root.iterdir():
-            if not key_dir.is_dir() or (key_filter and key_dir.name != key_filter):
-                continue
-            for wid_dir in key_dir.iterdir():
-                meta = cw_store.read_meta(wid_dir)
-                if meta is not None:
-                    metas.append(meta)
-    metas.sort(key=lambda m: m.get("updated_at", ""), reverse=True)
+    entries = [e for e in cw_index.scan(threads=False) if not key_filter or e["key"] == key_filter]
+    entries.sort(key=lambda e: e.get("updated_at") or "", reverse=True)
     walkthroughs = [
         {
-            "id": m.get("id"), "key": m.get("key"), "repo": m.get("repo"), "target": m.get("target"),
-            "status": m.get("status"), "updated_at": m.get("updated_at"),
-            "url": f"http://{HOST}:{daemon.port}/walkthrough/{m.get('key')}/{m.get('id')}/?k={daemon.token}",
+            "id": e["id"], "key": e["key"], "repo": e.get("repo"), "target": e.get("target"),
+            "status": e.get("status"), "updated_at": e.get("updated_at"),
+            "url": f"http://{HOST}:{daemon.port}/walkthrough/{e['key']}/{e['id']}/?k={daemon.token}",
         }
-        for m in metas[:limit]
+        for e in entries[:limit]
     ]
-    return {"walkthroughs": walkthroughs}
+    return {"walkthroughs": walkthroughs, "index": f"http://{HOST}:{daemon.port}/walkthrough?k={daemon.token}"}
 
 
 _RPC_TOOLS = {
@@ -580,9 +617,11 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
-    def _send(self, status, content_type, data):
+    def _send(self, status, content_type, data, extra_headers=()):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
+        for name, value in extra_headers:
+            self.send_header(name, value)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("Referrer-Policy", "no-referrer")
@@ -597,8 +636,8 @@ class _Handler(BaseHTTPRequestHandler):
     def _send_text(self, status, text_):
         self._send(status, "text/plain; charset=utf-8", text_.encode())
 
-    def _send_html(self, status, html):
-        self._send(status, "text/html; charset=utf-8", html.encode())
+    def _send_html(self, status, html, extra_headers=()):
+        self._send(status, "text/html; charset=utf-8", html.encode(), extra_headers)
 
     def _check_host(self):
         daemon = self.server.cw_daemon
@@ -621,18 +660,29 @@ class _Handler(BaseHTTPRequestHandler):
     def _check_token_header(self):
         daemon = self.server.cw_daemon
         token = self.headers.get("X-CW-Token", "")
-        if not hmac.compare_digest(token, daemon.token):
+        if not hmac.compare_digest(token.encode(), daemon.token.encode()):
             self._send_json(403, {"error": "forbidden"})
             return False
         return True
 
-    def _check_token_query(self, qs):
-        daemon = self.server.cw_daemon
-        token = (qs.get("k") or [""])[0]
-        if not hmac.compare_digest(token, daemon.token):
-            self._send_text(403, "forbidden")
-            return False
-        return True
+    def _check_page_auth(self, qs, denied="forbidden"):
+        """GET auth: ?k= or the port-scoped cw_k_<port> session cookie. Returns (ok, set_cookie_headers); a valid ?k= asks
+        the caller to set the cookie. POSTs never use this."""
+        token = self.server.cw_daemon.token.encode()
+        name = f"cw_k_{self.server.cw_daemon.port}"
+        k = (qs.get("k") or [""])[0]
+        if hmac.compare_digest(k.encode(), token):
+            return True, [("Set-Cookie", f"{name}={self.server.cw_daemon.token}; Path=/; HttpOnly; SameSite=Strict")]
+        jar = http.cookies.SimpleCookie()
+        try:
+            jar.load(self.headers.get("Cookie", ""))
+        except http.cookies.CookieError:
+            pass
+        morsel = jar.get(name)
+        if morsel is not None and hmac.compare_digest(morsel.value.encode(), token):
+            return True, []
+        self._send_text(403, denied)
+        return False, []
 
     def _read_body(self):
         length = int(self.headers.get("Content-Length", 0) or 0)
@@ -686,6 +736,14 @@ class _Handler(BaseHTTPRequestHandler):
         path, qs = parsed.path, urllib.parse.parse_qs(parsed.query)
         if path == "/health":
             return self._tracked(self._route_health)
+        if path in _PWA_ASSETS:
+            return self._tracked(lambda: self._route_pwa_asset(path))
+        if path in ("/walkthrough", "/walkthrough/"):
+            return self._tracked(lambda: self._route_index(qs))
+        if path == "/api/walkthroughs":
+            return self._tracked(lambda: self._route_walkthroughs(qs))
+        if path == "/api/walkthroughs/resolve":
+            return self._tracked(lambda: self._route_walkthroughs_resolve(qs))
         m = _EVENTS_RE.match(path)
         if m:
             # Long-lived; tracked via hub client_count, not the request tracker, for idle exit.
@@ -711,6 +769,8 @@ class _Handler(BaseHTTPRequestHandler):
             return self._tracked(self._route_rpc)
         if path == "/api/shutdown":
             return self._tracked(self._route_shutdown)
+        if path == "/api/walkthroughs/start":
+            return self._tracked(self._route_walkthroughs_start)
         m = _ASK_RE.match(path)
         if m:
             return self._tracked(lambda: self._route_comment(m.group(1), m.group(2), "question"))
@@ -755,8 +815,27 @@ class _Handler(BaseHTTPRequestHandler):
         self._send_json(200, {"protocol": cw_store.PROTOCOL, "pid": os.getpid(),
                               "code": cw_store.code_id(), "busy": self.server.cw_daemon.is_working()})
 
+    def _route_pwa_asset(self, path):
+        if not self._check_host():
+            return
+        ctype, data = _PWA_ASSETS[path]
+        self._send(200, ctype, data)
+
+    def _route_index(self, qs):
+        if not self._check_host():
+            return
+        ok, cookie = self._check_page_auth(qs, "forbidden: open the index with `cw_mcp.py open`, which opens a link with the access key")
+        if not ok or not self._check_origin():
+            return
+        blob = json.dumps({"token": self.server.cw_daemon.token, "nav": None}).replace("<", "\\u003c")
+        html = _INDEX_HTML.replace("</head>", f"<script>window.CW_LIVE={blob};</script></head>", 1)
+        self._send_html(200, _splice_nav(html, index=True), cookie)
+
     def _route_page(self, key, wid, qs):
-        if not self._check_host() or not self._check_token_query(qs) or not self._check_origin():
+        if not self._check_host():
+            return
+        ok, cookie = self._check_page_auth(qs)
+        if not ok or not self._check_origin():
             return
         d = self._resolve_dir(key, wid, json_errors=False)
         if d is None:
@@ -771,15 +850,17 @@ class _Handler(BaseHTTPRequestHandler):
             return
         daemon = self.server.cw_daemon
         live = _live_payload(key, wid, meta, d, daemon.token, daemon.port)
+        live["nav"] = cw_index.page_nav(cw_index.scan(threads=False), key, wid)
         blob = json.dumps(live, ensure_ascii=True).replace("<", "\\u003c")
         html = page_path.read_text()
         if _MERMAID_PLACEHOLDER in html:
             html = html.replace(_MERMAID_PLACEHOLDER, _mermaid_payload())
+        html = _splice_nav(html)
         injected = html.replace("</head>", f"<script>window.CW_LIVE={blob};</script></head>", 1)
-        self._send_html(200, injected)
+        self._send_html(200, injected, cookie)
 
     def _route_events(self, key, wid, qs):
-        if not self._check_host() or not self._check_token_query(qs) or not self._check_origin():
+        if not self._check_host() or not self._check_page_auth(qs)[0] or not self._check_origin():
             return
         d = self._resolve_dir(key, wid, json_errors=False)
         if d is None:
@@ -1935,6 +2016,70 @@ class _Handler(BaseHTTPRequestHandler):
         except cw_store.CWError as e:
             self._send_json(200, {"ok": False, "error": str(e), "remedy": e.remedy})
 
+    def _check_api_get(self, qs):
+        """GET /api/walkthroughs*: Host, then X-CW-Token header, ?k= or the cw_k_<port> cookie."""
+        if not self._check_host():
+            return False
+        header = self.headers.get("X-CW-Token", "")
+        if not (header and hmac.compare_digest(header.encode(), self.server.cw_daemon.token.encode())):
+            if not self._check_page_auth(qs)[0]:
+                return False
+        return self._check_origin()
+
+    def _route_walkthroughs(self, qs):
+        if not self._check_api_get(qs):
+            return
+        rows = cw_index.rows(cw_index.scan(), datetime.now().astimezone())
+        for r in rows:
+            r["url"] = f"/walkthrough/{r['key']}/{r['id']}/"
+        self._send_json(200, {"rows": rows, "counts": cw_index.counts(rows)})
+
+    def _route_walkthroughs_resolve(self, qs):
+        if not self._check_api_get(qs):
+            return
+        entries = cw_index.scan(threads=False)
+        parsed = cw_index.parse_target((qs.get("q") or [""])[0])
+        found = cw_index.matches(parsed, entries)
+        for m in found:
+            m["url"] = f"/walkthrough/{m['key']}/{m['id']}/"
+        label = None
+        if parsed:
+            if parsed["kind"] == "pr":
+                label = f"{parsed['gh_repo']}#{parsed['pr']}"
+            elif parsed["kind"] == "range":
+                label = f"{parsed['base']}...{parsed['head']}"
+            else:
+                label = parsed["sha"][:7]
+        self._send_json(200, {"kind": parsed["kind"] if parsed else None, "label": label, "matches": found,
+                              "repos": cw_index.repo_choices(parsed, entries, timeout=2)})
+
+    def _route_walkthroughs_start(self):
+        if not self._check_host() or not self._check_token_header() or not self._check_origin():
+            return
+        raw, too_big = self._read_body()
+        if too_big:
+            return
+        try:
+            body = json.loads(raw) if raw else {}
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            self._send_json(400, {"error": "bad json"})
+            return
+        try:
+            parsed = cw_index.parse_target(body["input"] if isinstance(body.get("input"), str) else "")
+            repo = body.get("repo") if isinstance(body.get("repo"), str) else None
+            if parsed and not repo:
+                choices = cw_index.repo_choices(parsed, cw_index.scan())
+                repo = choices[0]["repo"] if choices else parsed.get("gh_repo")
+            args = cw_index.start_args(parsed, repo, fresh=body.get("fresh") is True, clone=body.get("clone") is True)
+            res = _tool_walkthrough_start(self.server.cw_daemon, args)
+            result = {"url": f"/walkthrough/{res['key']}/{res['id']}/", "reused": res["reused"], "id": res["id"],
+                      "key": res["key"], "status": res["status"]}
+            self._send_json(200, {"ok": True, "result": result})
+        except cw_store.CWError as e:
+            self._send_json(200, {"ok": False, "error": str(e), "remedy": e.remedy})
+
     def _route_shutdown(self):
         if not self._check_host() or not self._check_token_header() or not self._check_origin():
             return
@@ -1978,13 +2123,21 @@ class Daemon:
         old = cw_store.read_json(cw_store.server_json_path())
         prev_port = old.get("port") if isinstance(old, dict) else None
         server = None
-        if prev_port:
-            try:
-                server = ThreadingHTTPServer((HOST, prev_port), _Handler)
-            except OSError:
-                server = None
+        if self.write_server_json:
+            configured = cw_store.load_config().get("port")
+            candidates = (configured, prev_port)
+            for port in dict.fromkeys(
+                p for p in candidates if isinstance(p, int) and not isinstance(p, bool) and 0 < p < 65536
+            ):
+                try:
+                    server = ThreadingHTTPServer((HOST, port), _Handler)
+                    break
+                except OSError as exc:
+                    print(f"port {port} unavailable: {exc}", file=sys.stderr, flush=True)
         if server is None:
             server = ThreadingHTTPServer((HOST, 0), _Handler)
+            if self.write_server_json:
+                print(f"falling back to port {server.server_port}", file=sys.stderr, flush=True)
         server.daemon_threads = True
         server.cw_daemon = self
         self._server = server
