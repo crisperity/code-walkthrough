@@ -5,10 +5,9 @@
 Turns a diff, a PR, or a part of the codebase you want explained into a page
 you read top down, from the big picture to the exact lines.
 
-![Opening the lazygit PR #5702 walkthrough from the Walkthroughs dashboard](docs/demo/walkthrough.gif)
+![Scrolling through a walkthrough of lazygit PR #5702](docs/demo/walkthrough.gif)
 
-Every walkthrough you build is listed on one dashboard at `/walkthrough`, which
-you can install as an app. The one opened above is a `/code-walkthrough` run on lazygit PR
+The page above is one `/code-walkthrough` run on lazygit PR
 [#5702](https://github.com/jesseduffield/lazygit/pull/5702), "Make the side
 panels configurable": 30 files, +1008 -179. Select text on it and click Ask to
 question the agent in place; ask it to draw any diagram and it adds one to the
@@ -61,6 +60,14 @@ already know where it sits.
 Changed `.md` files and images have a Diff | Preview switch that swaps the diff for
 the rendered file. If you work something out in your head on every review that
 could live on this page, [open an issue](https://github.com/crisperity/code-walkthrough/issues).
+
+## Every walkthrough in one place
+
+![Opening the lazygit PR #5702 walkthrough from the Walkthroughs dashboard](docs/demo/dashboard.gif)
+
+Every walkthrough you build is listed on one dashboard at `/walkthrough`,
+grouped by day, with stacked PRs nested. Search it, or paste a PR link, branch
+range or commit to start a new one. It can be installed as an app.
 
 ## What a run costs
 
