@@ -5,9 +5,10 @@
 Turns a diff, a PR, or a part of the codebase you want explained into a page
 you read top down, from the big picture to the exact lines.
 
-![Scrolling through a walkthrough of lazygit PR #5702](docs/demo/walkthrough.gif)
+![Opening the lazygit PR #5702 walkthrough from the Walkthroughs dashboard](docs/demo/walkthrough.gif)
 
-The page above is one `/code-walkthrough` run on lazygit PR
+Every walkthrough you build is listed on one dashboard at `/walkthrough`, which
+you can install as an app. The one opened above is a `/code-walkthrough` run on lazygit PR
 [#5702](https://github.com/jesseduffield/lazygit/pull/5702), "Make the side
 panels configurable": 30 files, +1008 -179. Select text on it and click Ask to
 question the agent in place; ask it to draw any diagram and it adds one to the
