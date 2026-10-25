@@ -1,8 +1,6 @@
-# crisperity-skills
+<p align="center"><img src="skills/code-walkthrough/assets/icon.svg" width="112" alt="code-walkthrough icon"></p>
 
-Claude Code plugin with skills I use on real work. One so far, code-walkthrough.
-
-## code-walkthrough
+<h1 align="center">code-walkthrough</h1>
 
 Turns a diff, a PR, or a part of the codebase you want explained into a page
 you read top down, from the big picture to the exact lines.
@@ -23,7 +21,7 @@ page.
 /code-walkthrough explain the auth flow    # code as it stands, no change needed
 ```
 
-### Why
+## Why
 
 Agents write code faster than anyone can read it now, so reading and
 responding is the bottleneck, not writing. A unified diff is a bad surface to
@@ -35,7 +33,7 @@ takes, then what it touches, and only then point at lines. code-walkthrough
 builds the page in that order, so by the time you reach a line of code you
 already know where it sits.
 
-### Top down, one question per level
+## Top down, one question per level
 
 1. **Overview: what changed, and why.** Two sentences and a few bullets, no
    file names. On the example: lazygit's side panels stop being a fixed five
@@ -61,9 +59,9 @@ already know where it sits.
 
 Changed `.md` files and images have a Diff | Preview switch that swaps the diff for
 the rendered file. If you work something out in your head on every review that
-could live on this page, [open an issue](https://github.com/crisperity/crisperity-skills/issues).
+could live on this page, [open an issue](https://github.com/crisperity/code-walkthrough/issues).
 
-### What a run costs
+## What a run costs
 
 Live mode is the default. On the example PR a build took about 2 minutes and
 149k tokens, and each question you ask adds a few tens of thousands more.
@@ -82,7 +80,7 @@ that backend. Only a model on your own machine (Ollama, vLLM) keeps them
 local. Threads can't edit files unless you trust the repo, from the Threads
 panel or `trust.repos` in the config; see `skills/code-walkthrough/references/live.md`.
 
-### Prerequisites
+## Prerequisites
 
 - `python3`, standard library only, nothing to install
 - `git`
@@ -93,7 +91,7 @@ panel or `trust.repos` in the config; see `skills/code-walkthrough/references/li
   run after installing. `/code-walkthrough` does it for you when live mode is
   missing. Details in `skills/code-walkthrough/references/setup.md`.
 
-### Language support
+## Language support
 
 Everything built from the diff itself works in any language: the grouping and
 reading order, the annotated walkthrough, per-line comments and the
@@ -115,6 +113,6 @@ nothing else changes.
 Claude Code plugin only. Other harnesses are untested.
 
 ```
-/plugin marketplace add crisperity/crisperity-skills
-/plugin install crisperity-skills@crisperity
+/plugin marketplace add crisperity/code-walkthrough
+/plugin install code-walkthrough@crisperity
 ```
