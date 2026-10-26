@@ -23,6 +23,19 @@ python3 <skill>/scripts/cw_mcp.py setup --agent claude   # Claude Code
 python3 <skill>/scripts/cw_mcp.py setup --agent print     # any other harness, prints mcpServers JSON to paste
 ```
 
+On Linux with systemd, `setup` also installs a user service (`code-walkthrough.service`) so the
+daemon runs from login on and never exits on idle: `http://127.0.0.1:27183/walkthrough` is always
+there, even for the installed PWA. Tell the user this when you run it. It is skipped without
+systemd, and `setup --no-service` skips it too. Manage it on its own with:
+
+```bash
+python3 <skill>/scripts/cw_mcp.py service install     # or: uninstall
+```
+
+A user service starts with a bare environment, so `PATH` is frozen at install time. Put API keys
+a backend reads from the environment in `~/.code-walkthrough/env` (`NAME=value` lines), then
+`stop` to restart the daemon. To keep it running after logout run `loginctl enable-linger`.
+
 ## 2. Fill in a backend, if the config still has placeholders
 
 A freshly written proxy template points at placeholder `base_url`/`model` values. Ask the user

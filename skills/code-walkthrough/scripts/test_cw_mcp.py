@@ -668,3 +668,35 @@ def test_open_prints_token_url_only_with_print_or_when_no_browser(monkeypatch, c
     launched[0] = False
     assert cw_mcp.main(["open"]) == 0
     assert capsys.readouterr().out.strip() == url
+
+
+def test_service_install_writes_unit_and_spawn_goes_through_systemd():
+    if sys.platform != "linux":
+        return
+    with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
+        bindir, xdg = Path(tmp) / "bin", Path(tmp) / "xdg"
+        bindir.mkdir()
+        log = Path(tmp) / "calls"
+        (bindir / "systemctl").write_text(f'#!/bin/sh\necho "$@" >> {log}\n')
+        (bindir / "systemctl").chmod(0o755)
+        old = {k: os.environ.get(k) for k in ("PATH", "XDG_CONFIG_HOME")}
+        os.environ["PATH"] = f"{bindir}{os.pathsep}{old['PATH']}"
+        os.environ["XDG_CONFIG_HOME"] = str(xdg)
+        try:
+            assert not cw_mcp.service_installed()
+            with contextlib.redirect_stderr(io.StringIO()):
+                assert cw_mcp.cmd_service("install") == 0
+            unit = (xdg / "systemd/user/code-walkthrough.service").read_text()
+            assert "Environment=CW_IDLE_S=0" in unit and "Restart=always" in unit
+            assert f"{home}/scripts-dir" in unit and f"CODE_WALKTHROUGH_HOME={home}" in unit
+            assert (home / "scripts-dir").read_text() == str(cw_mcp.SCRIPTS_DIR)
+            assert "--user enable --now code-walkthrough.service" in log.read_text()
+            log.write_text("")
+            cw_mcp._spawn_daemon()  # installed: asks systemd, does not Popen
+            assert log.read_text().strip() == "--user start code-walkthrough.service"
+            with contextlib.redirect_stderr(io.StringIO()):
+                assert cw_mcp.cmd_service("uninstall") == 0
+            assert not cw_mcp.service_installed()
+        finally:
+            for k, v in old.items():
+                os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)

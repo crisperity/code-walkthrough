@@ -124,3 +124,8 @@ Claude Code plugin only. Other harnesses are untested.
 /plugin marketplace add crisperity/code-walkthrough
 /plugin install code-walkthrough@crisperity
 ```
+
+The first run of `/code-walkthrough` sets up live mode. On Linux with systemd that includes a
+user service that keeps the dashboard at `http://127.0.0.1:27183/walkthrough` running from login
+on; `python3 skills/code-walkthrough/scripts/cw_mcp.py service uninstall` removes it and the
+daemon goes back to starting on demand.
