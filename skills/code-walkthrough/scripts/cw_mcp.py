@@ -144,6 +144,10 @@ def _post(info, path, body=None, timeout=5):
 
 
 def _spawn_daemon():
+    if service_installed():
+        r = _systemctl("start", SERVICE)
+        if r is not None and r.returncode == 0:
+            return
     log_path = cw_store.log_path()
     log_f = open(log_path, "a")
     try:
@@ -165,6 +169,7 @@ def ensure_server():
     "code" field counts as different), unless it is mid-turn or mid-run, in which case it is left
     alone and replaced on the first call after it goes idle. Otherwise spawn and poll
     (CW_START_TIMEOUT)."""
+    _write_scripts_dir()
     info = cw_store.read_json(cw_store.server_json_path())
     if info:
         health = _probe_health(info.get("port"))
@@ -857,7 +862,7 @@ _CLAUDE_CODE_TEMPLATE = {
 }
 
 
-def cmd_setup(agent):
+def cmd_setup(agent, service=False):
     config_path = cw_store.config_path()
     if not config_path.exists():
         if shutil.which("claude"):
@@ -866,6 +871,9 @@ def cmd_setup(agent):
         else:
             cw_store.write_json(config_path, _CONFIG_TEMPLATE)
             _log(f"wrote {config_path} (proxy template)")
+
+    if service:
+        cmd_service("install")
 
     if "/.claude/plugins/" in str(SCRIPTS_DIR):
         _log(f"MCP server already registered by the plugin install; config is at {config_path}")
@@ -909,6 +917,8 @@ def cmd_check():
 
 
 def cmd_stop():
+    if service_installed():
+        _systemctl("stop", SERVICE)
     info = cw_store.read_json(cw_store.server_json_path())
     if not info:
         print("not running")
@@ -924,6 +934,83 @@ def cmd_stop():
         except ProcessLookupError:
             pass
     print("stopped")
+    return 0
+
+
+SERVICE = "code-walkthrough.service"
+
+
+def _unit_path():
+    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "systemd" / "user" / SERVICE
+
+
+def service_installed():
+    return _unit_path().exists()
+
+
+def _write_scripts_dir():
+    """The unit finds the daemon through this pointer, so a plugin update (new cache dir) needs no
+    unit rewrite: the next MCP start repoints it."""
+    path = cw_store.home() / "scripts-dir"
+    try:
+        if not path.exists() or path.read_text() != str(SCRIPTS_DIR):
+            path.write_text(str(SCRIPTS_DIR))
+    except OSError:
+        pass
+
+
+def _systemctl(*args):
+    try:
+        return subprocess.run(["systemctl", "--user", *args], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def _unit_text():
+    home = str(cw_store.home()).replace("%", "%%")
+    path = os.environ.get("PATH", "").replace("%", "%%")
+    py = sys.executable.replace("%", "%%")
+    # PATH is frozen at setup time (a user unit does not see the shell's); put API keys in <home>/env.
+    return f"""[Unit]
+Description=code-walkthrough daemon
+
+[Service]
+ExecStart=/bin/sh -c 'exec "{py}" "$(cat "{home}/scripts-dir")/cw_server.py" serve'
+Restart=always
+RestartSec=2
+Environment=CW_IDLE_S=0
+Environment=CODE_WALKTHROUGH_HOME={home}
+Environment=PATH={path}
+EnvironmentFile=-{home}/env
+
+[Install]
+WantedBy=default.target
+"""
+
+
+def cmd_service(action):
+    """install: keep the daemon running from login on (systemd user unit). uninstall: back to
+    on-demand starts."""
+    if sys.platform != "linux" or shutil.which("systemctl") is None:
+        _log("always-on needs systemd (Linux); the daemon still starts on demand")
+        return 0
+    if action == "uninstall":
+        _systemctl("disable", "--now", SERVICE)
+        _unit_path().unlink(missing_ok=True)
+        _systemctl("daemon-reload")
+        _log(f"removed {SERVICE}; the daemon starts on demand again")
+        return 0
+    cmd_stop()  # a daemon started on demand would hold the lock and make the unit exit
+    _write_scripts_dir()
+    unit = _unit_path()
+    unit.parent.mkdir(parents=True, exist_ok=True)
+    unit.write_text(_unit_text())
+    for args in (("daemon-reload",), ("enable", "--now", SERVICE)):
+        r = _systemctl(*args)
+        if r is None or r.returncode:
+            _log(f"systemctl --user {' '.join(args)} failed: {(r.stderr if r else 'no systemctl').strip()}")
+            return 1
+    _log(f"{SERVICE} enabled: the daemon runs from login on. `cw_mcp.py service uninstall` undoes it")
     return 0
 
 
@@ -946,6 +1033,9 @@ def main(argv=None):
     sub.add_parser("mcp")
     setup_parser = sub.add_parser("setup")
     setup_parser.add_argument("--agent", choices=["claude", "print"], default="print")
+    setup_parser.add_argument("--no-service", action="store_true", help="do not install the always-on daemon")
+    service_parser = sub.add_parser("service")
+    service_parser.add_argument("action", choices=["install", "uninstall"])
     outcomes_parser = sub.add_parser("outcomes")
     outcomes_parser.add_argument("--dir", required=True)
     outcomes_parser.add_argument("--qid", required=True)
@@ -968,7 +1058,9 @@ def main(argv=None):
     if args.cmd == "runner":
         return cmd_runner(args.dir, args.qid, args.worktree, args.timeout)
     if args.cmd == "setup":
-        return cmd_setup(args.agent)
+        return cmd_setup(args.agent, service=not args.no_service)
+    if args.cmd == "service":
+        return cmd_service(args.action)
     if args.cmd == "check":
         return cmd_check()
     if args.cmd == "stop":

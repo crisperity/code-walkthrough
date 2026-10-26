@@ -2589,7 +2589,7 @@ def serve():
         cw_llm.configure(config.get("max_concurrency", 4))
         _mark_interrupted()
         _prune()
-        idle_s = int(os.environ.get("CW_IDLE_S", 2700))
+        idle_s = int(os.environ.get("CW_IDLE_S", 2700)) or None  # 0: never exit on idle (always-on service)
         daemon = Daemon(idle_s=idle_s, write_server_json=True)
         daemon.start()
         daemon.wait_stopped()
