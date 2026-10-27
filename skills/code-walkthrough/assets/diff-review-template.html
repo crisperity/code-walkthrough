@@ -921,9 +921,20 @@
   }
   @keyframes cw-dot{0%,80%,100%{opacity:.25}40%{opacity:1}}
   .cw-caret{display:inline-block;width:2px;height:1em;margin-left:1px;vertical-align:text-bottom;background:var(--purple)}
-  .cw-pageedit{display:block;box-sizing:border-box;max-width:100%;margin:8px 0;padding:8px 10px;
-    border-left:3px solid var(--purple);background:color-mix(in srgb,var(--purple) 6%,transparent);
+  .cw-pageedit{display:block;box-sizing:border-box;max-width:100%;margin:14px 0;padding:12px 14px 14px;
+    border:1px dashed color-mix(in srgb,var(--purple) 70%,transparent);border-radius:12px;
+    background:color-mix(in srgb,var(--purple) 5%,transparent);
     white-space:normal;overflow-wrap:anywhere}
+  .cw-pageedit.cw-kept{position:relative;padding:0;border:0;border-radius:0;background:none}
+  .cw-pageedit.cw-kept::before{content:"";position:absolute;left:-12px;top:6px;bottom:6px;width:3px;border-radius:2px;
+    background:color-mix(in srgb,var(--purple) 45%,transparent)}
+  .cw-pageedit-bar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin-bottom:10px;
+    color:var(--muted);font:var(--fs-xs)/1.4 system-ui,sans-serif}
+  .cw-pageedit-bar b{color:var(--text);font-weight:600}
+  .cw-pageedit-bar .cw-grow{flex:1}
+  .cw-kept .cw-pageedit-bar{margin:6px 0 0;opacity:.55;transition:opacity .15s}
+  .cw-kept:hover .cw-pageedit-bar,.cw-kept:focus-within .cw-pageedit-bar{opacity:1}
+  .cw-pageedit .cw-vis svg{max-width:100%}
   .cw-pageedit-label{margin:0 0 4px;color:var(--muted);font:var(--fs-xs)/1.4 system-ui,sans-serif}
   .cw-pageedit-chip{margin-left:8px;padding:0 6px;border:1px solid var(--border);border-radius:10px}
   .cw-pageedit-body>:first-child{margin-top:0}
@@ -4576,27 +4587,37 @@ if(window.CW_LIVE){
       const t=threads.get(o.thread_id);
       if(o.state!=='applied'||!t) return;
       const dest=pageEditTarget(o);
-      const n=mk('div','cw-pageedit'); n.dataset.oid=o.oid;
-      const label=mk('p','cw-pageedit-label','added by agent from your comment');
-      if(dest.outdated) label.append(mk('span','cw-pageedit-chip','outdated'));
+      const kept=!!p.kept;
+      const n=mk('div','cw-pageedit'+(kept?' cw-kept':'')); n.dataset.oid=o.oid;
+      const r=(t.turns||[]).find(x=>x.qid===o.qid)||{};
+      const who=r.setup?r.setup+(r.model?' \u00b7 '+r.model[0].toUpperCase()+r.model.slice(1):''):'the agent';
+      const bar=mk('div','cw-pageedit-bar');
+      if(typeof window!=='undefined'&&window.CWAgent) bar.append(window.CWAgent.spark());
+      bar.append(kept?mk('span',null,'added by '+who+', kept by you'):mk('span',null,'Suggested by '),
+        ...(kept?[]:[mk('b',null,who),mk('span',null,'\u00b7 from your comment')]));
+      if(dest.outdated) bar.append(mk('span','cw-pageedit-chip','outdated'));
       const msg=mk('span','cw-pageedit-msg'); msg.setAttribute('role','status');
-      const undo=mkBtn('Undo','fb-ghost');
-      undo.addEventListener('click',()=>pageEditAct(o.oid,'revert',undo,msg));
-      const open=mkBtn('Open thread','fb-ghost');
+      const open=mkBtn('Thread','fb-ghost');
       open.addEventListener('click',()=>openThreadOf(t));
-      const acts=mk('div','cw-pageedit-actions'); acts.append(undo,open,msg);
-      n.append(label,pageEditContent(p.block));
+      const undo=mkBtn(kept?'Undo':'Discard','fb-ghost');
+      undo.addEventListener('click',()=>pageEditAct(o.oid,'revert',undo,msg));
+      bar.append(mk('span','cw-grow'),msg,open,undo);
+      if(!kept){
+        const keep=mkBtn('\u2713 Keep in page','fb-primary');
+        keep.addEventListener('click',()=>pageEditAct(o.oid,'keep',keep,msg));
+        bar.append(keep);
+      }
+      if(kept) n.append(pageEditContent(p.block),bar); else n.append(bar,pageEditContent(p.block));
       let orig=null;
       if(p.op==='replace'&&dest.el&&!dest.outdated){
         orig=dest.el;
         const det=document.createElement('details');
         det.append(mk('summary',null,'original'),mk('p','cw-pageedit-orig',textOf(orig.querySelector('.cw-pageedit-body')||orig)));
-        n.append(det);
+        if(!kept) n.append(det);
         if(!hiddenBy.has(orig)) hiddenBy.set(orig,new Set());
         hiddenBy.get(orig).add(o.oid);
         orig.classList.add('cw-pageedit-hidden');
       }
-      n.append(acts);
       if(dest.el) dest.el.insertAdjacentElement('afterend',n); else planEl.prepend(n);
       pageEdits.set(o.oid,{node:n,orig,sig,o,outdated:dest.outdated,destEl:dest.el});
       n.querySelectorAll('pre.mermaid').forEach(pre=>renderMermaidEdit(pre,pre.textContent));

@@ -1077,6 +1077,9 @@ def test_page_edit_applies_at_creation_and_revert_reapply_fold():
         assert cw_ask.outcome_action(d, oid, "reapply", on_event=on_event)["state"] == "applied"
         assert seen == ["reverted", "applied"]
         assert cw_ask.read_threads(d)["q1"]["outcomes"][0]["state"] == "applied"
+        kept = cw_ask.outcome_action(d, oid, "keep")
+        assert kept["state"] == "applied" and kept["payload"]["kept"] is True
+        assert cw_ask.outcome_action(d, oid, "revert")["payload"]["kept"] is False
 
 
 def test_page_edit_undo_and_redo_reach_the_next_prompt():

@@ -483,6 +483,7 @@ _TRANSITIONS = {
     ("github_draft", "verbatim"): ("proposed", "proposed"),
     ("page_edit", "revert"): ("applied", "reverted"),
     ("page_edit", "reapply"): ("reverted", "applied"),
+    ("page_edit", "keep"): ("applied", "applied"),
     ("draft_comments", "keep"): ("applied", "kept"),
     ("draft_comments", "dismiss"): (("applied", "kept"), "dismissed"),
     ("task", "dismiss"): (("proposed", "handed"), "dismissed"),
@@ -514,6 +515,9 @@ def _outcome_action(d, oid, action, payload, on_event):
     event = {"type": "state", "oid": oid, "by": "user", "at": cw_store.now_iso(), "state": to_state}
     if current["outcome"] == "github_draft" and action in ("edit", "keep", "verbatim"):
         event["payload"] = _github_draft_payload(current["payload"], action, payload, d, current["qid"])
+    elif current["outcome"] == "page_edit" and action in ("keep", "revert"):
+        # Kept = part of the page, shown without the suggestion frame; undo clears it.
+        event["payload"] = {**current["payload"], "kept": action == "keep"}
     elif current["outcome"] == "draft_comments" and action == "keep":
         note_ids = (payload or {}).get("note_ids")
         if note_ids is not None:
@@ -670,7 +674,8 @@ def _outcome_updates_text(d, thread_id, since_last_turn=True):
             continue
         payload = r.get("payload") or o["payload"]
         if o["outcome"] == "page_edit":
-            verb = "undid" if r.get("state") == "reverted" else "redid"
+            verb = ("undid" if r.get("state") == "reverted" else
+                    "kept" if (r.get("payload") or {}).get("kept") else "redid")
             if _OID_TARGET_RE.fullmatch(str(payload["target"])):
                 lines.append(f"The user {verb} your edit {payload['target']} replacement ({payload['op']})")
             else:
