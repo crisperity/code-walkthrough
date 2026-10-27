@@ -693,3 +693,23 @@ def test_ticket_is_not_fetched_without_full_access_or_with_context():
             cw_store.update_meta(d, lambda m: m.update(own_pr=True))
             cw_store.write_json(d / "context.json", {"purpose": "x"})
             assert daemon.maybe_link_ticket(d.parent.name, d.name, d) is None    # already compared
+
+
+def test_approved_mcp_tools_reach_later_full_turns_and_only_mcp_names_are_accepted():
+    with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
+        ask, d, _repo = _full_fixture(tmp, home)
+        path = f"/api/walkthrough/{d.parent.name}/{d.name}/approve"
+        with cw_testlib.fake_claude(tmp, {"sonnet": [cw_testlib.claude_stream_entry(["ok"])]}) as fc, \
+                cw_testlib.running_daemon() as daemon:
+            def post(tools):
+                return cw_testlib.request(daemon, "POST", path, token=daemon.token, body=json.dumps({"tools": tools}))[0]
+            assert post(["Bash(rm -rf:*)"]) == 400 and post([]) == 400 and post("mcp__x__y") == 400
+            assert post(["mcp__plugin_core_axon__jira-get-issue"]) == 200
+            assert post(["mcp__plugin_core_axon__jira-get-issue"]) == 200          # no duplicate
+            assert _comment(ask, daemon, d, "full")[0] == 202
+            ask._wait_final(d, 1)
+        approved = list(cw_store.load_config()["approved_tools"].values())
+        assert approved == [["mcp__plugin_core_axon__jira-get-issue"]]
+        argv = next(e["argv"] for e in fc.log() if "--setting-sources" in e["argv"])
+        allowed = next(a for a in argv if a.startswith("--allowedTools="))
+        assert "mcp__plugin_core_axon__jira-get-issue" in allowed and "mcp__cw__set_context" in allowed

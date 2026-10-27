@@ -5184,6 +5184,23 @@ if(window.CW_LIVE){
         const ul=mk('ul',null);
         for(const x of r.denied) ul.append(mk('li',null,String((x&&x.tool)||'')+(x&&x.detail?' '+x.detail:'')));
         dn.append(ul); d.append(dn);
+        // MCP tools (a Jira read, say) can be allowed for this Claude install; the turn then runs again.
+        const mcpTools=[...new Set(r.denied.map(x=>x&&x.tool).filter(n=>/^mcp__[A-Za-z0-9_.-]+$/.test(n||'')))];
+        if(mcpTools.length&&isLast){
+          const allow=mkBtn(mcpTools.length===1?'Allow and retry':'Allow these and retry','fb-ghost cw-allow');
+          allow.title='Every later Full turn on this Claude install may call '+mcpTools.join(', ')+' without asking.';
+          allow.addEventListener('click',()=>{
+            allow.disabled=true; t.msg.textContent='';
+            postJson('/approve',{tools:mcpTools})
+              .then(({ok,body})=>{
+                if(!ok||body.error) throw new Error(body.error||'Request failed');
+                return postJson('/comment',{anchors:turnRefs(r),text:r.comment||r.question||'',thread_id:t.id});
+              })
+              .then(({ok,body})=>{ if(!ok) throw new Error(body.error||'Request failed'); })
+              .catch(e=>{ allow.disabled=false; t.msg.textContent=e.message||'Request failed -- check the daemon is still running.'; });
+          });
+          dn.append(allow);
+        }
       }
       if((r.status==='error'||r.status==='cancelled')&&isLast) d.append(retryBtn(t,r));
       for(const o of (outcomesByQid.get(r.qid)||new Map()).values()) d.append(outcomeEl(t,o));

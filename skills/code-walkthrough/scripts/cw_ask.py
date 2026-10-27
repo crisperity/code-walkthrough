@@ -1092,7 +1092,8 @@ def _claude_turn(d, record, profile, config, anchor, question, on_event, live, o
 
     def run(session_id=None, resume=None):
         if full:
-            allowed = ",".join(MCP_PREFIX + t["name"] for t in cw_mcp.outcome_tools("full"))
+            allowed = ",".join([MCP_PREFIX + t["name"] for t in cw_mcp.outcome_tools("full")]
+                               + cw_llm.approved_tools(config, cdir))
             argv = cw_llm.full_argv(profile, system, mcp_config=mcp_config, allowed=allowed, add_dir=ctx,
                                     session_id=session_id, resume=resume)
             turns = d / "turns"

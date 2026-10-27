@@ -476,6 +476,19 @@ def agents_payload(config, selected=None):
             "setup_due": len(everything) > 1 and not config.get("setups_seen")}
 
 
+APPROVABLE_TOOL = re.compile(r"mcp__[A-Za-z0-9_.-]+")
+
+
+def effective_config_dir(config_dir=None):
+    return str(Path(config_dir) if config_dir else claude_dir(Path.home()).resolve())
+
+
+def approved_tools(config, config_dir=None):
+    """MCP tools the user allowed for Full turns on this install, from a "Needs permission" prompt."""
+    raw = (config.get("approved_tools") or {}).get(effective_config_dir(config_dir)) or []
+    return [t for t in raw if isinstance(t, str) and APPROVABLE_TOOL.fullmatch(t)]
+
+
 _SLASH_RE = re.compile(r"(?<![\w/])/([a-z][\w-]*(?::[\w-]+)?)")
 
 
