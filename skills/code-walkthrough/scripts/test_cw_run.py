@@ -824,6 +824,12 @@ def _hint_repo(tmp, message="head"):
     return {"repo": str(repo), "base": base, "head": head, "head_ref": head}
 
 
+def test_ticket_key_in_a_lowercase_branch_but_not_a_version():
+    assert cw_run._ticket_key("feat/ai-915-fix", ignore_case=True) == "AI-915"
+    assert cw_run._ticket_key("release/v2-3", ignore_case=True) is None
+    assert cw_run._ticket_key("fixes ai-915") is None
+
+
 def test_ticket_hint_comes_from_the_branch_name_without_a_ref_to_it():
     with tempfile.TemporaryDirectory() as tmp:
         meta = _hint_repo(tmp)

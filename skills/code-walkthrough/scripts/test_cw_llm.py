@@ -593,7 +593,8 @@ def test_full_disallows_web_tools():
     assert {"WebFetch", "WebSearch"} <= set(cw_llm.FULL_DISALLOWED.split(","))
 
 
-def test_confine_prefix():
+def test_confine_prefix(monkeypatch):
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     h = "/home/u"
     assert cw_llm.confine_prefix("/w/d/agent", "/r", h, "/w/d/turns", sockets=["/run/docker.sock"],
                                  exists=lambda p: True, secrets=["/w/d/token"]) == [
@@ -615,9 +616,17 @@ def test_confine_prefix():
     ]
 
 
-def test_project_dir_matches_claude_codes_encoding():
+def test_project_dir_matches_claude_codes_encoding(monkeypatch):
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     assert cw_llm.project_dir("/home/u", "/home/u/.t3/work_trees/a b") == Path(
         "/home/u/.claude/projects/-home-u--t3-work-trees-a-b")
+
+
+def test_claude_state_follows_claude_config_dir(monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/home/u/.claude-private")
+    assert cw_llm.project_dir("/home/u", "/w/a") == Path("/home/u/.claude-private/projects/-w-a")
+    argv = cw_llm.confine_prefix("/w/d/agent", "/r", "/home/u", "/w/d/turns", sockets=[], exists=lambda p: False)
+    assert "/home/u/.claude-private/sessions" in argv and "/home/u/.claude/sessions" not in argv
 
 
 def test_confine_prefix_masks_only_existing_paths():

@@ -1373,7 +1373,7 @@ def test_full_turn_is_wrapped_in_bwrap_when_available(monkeypatch, tmp_path):
     seen = []
     monkeypatch.setattr(cw_llm, "confinement_available", lambda: True)
     monkeypatch.setattr(cw_llm, "git_common_dir", lambda wt: tmp_path / "repo.git")
-    monkeypatch.setattr(cw_llm, "confine_prefix", lambda *a: ["BWRAP", *map(str, a)])
+    monkeypatch.setattr(cw_llm, "confine_prefix", lambda *a, **k: ["BWRAP", *map(str, a)])
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
     monkeypatch.setattr(cw_ask, "_stream_once", lambda argv, *a, **k: seen.append((argv, k["cwd"])) or 1 / 0)
     with cw_testlib.temp_home() as home:

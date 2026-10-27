@@ -1799,9 +1799,11 @@ NOT_TICKET_PREFIX = {"UTF", "ISO", "SHA", "CVE", "RFC", "X86", "MD5", "AES", "GP
                      "ABC", "PROJ", "XXX", "TODO", "FIXME"}
 
 
-def _ticket_key(text):
-    for m in TICKET_KEY.finditer(text):
-        if m.group().partition("-")[0] not in NOT_TICKET_PREFIX:
+def _ticket_key(text, ignore_case=False):
+    # Branch names are lower-cased by many tools (`feat/ai-915-fix`); PR text and commits are not.
+    for m in TICKET_KEY.finditer(text.upper() if ignore_case else text):
+        prefix = m.group().partition("-")[0]
+        if prefix not in NOT_TICKET_PREFIX and not (ignore_case and prefix[1].isdigit()):  # v2-3 is a version
             return m.group()
     return None
 
@@ -1842,7 +1844,7 @@ def detect_ticket_hint(meta):
     sources = (("branch", f"{meta.get('head_ref') or ''}\n{branches}"), ("pr_body", pr_text),
                ("commit", out([*repo, "log", "--format=%B", f"{meta['base']}..{meta['head']}"])))
     for found_in, text in sources:
-        key = _ticket_key(text)
+        key = _ticket_key(text, ignore_case=found_in == "branch")
         if key:
             return {"key": key, "found_in": found_in}
     for found_in, text in sources[1:]:

@@ -1152,6 +1152,7 @@
     border-radius:10px;overflow-x:auto;max-width:100%;font-family:var(--font-sans);
     font-size:var(--fs-md);line-height:1.4;color:var(--text)}
   .cw-vis svg{display:block;width:100%;height:auto;max-width:760px;margin:0 auto}
+  .cw-vis:not(.cw-ov-wrap):has(svg){cursor:zoom-in}
   .cw-vis img{max-width:100%}
   .cw-vis-group{margin:8px 0 14px}
 
@@ -2010,8 +2011,10 @@ if(window.CW_LIVE){
   // The svg actually on screen inside `box`: for a wrapper that's its one .mermaid child, for
   // a graph level box (box IS the .mermaid element, one per detail level, siblings hidden by
   // the level script) it's the box's own svg.
+  // Model-drawn SVG pictures (page edits from threads, per-group visuals): click to open the zoom dialog.
+  const PIC_SEL='.cw-vis:not(.cw-ov-wrap)';
   function visibleSvg(box){
-    return box.matches('.mermaid')?box.querySelector('svg')
+    return box.matches('.mermaid,'+PIC_SEL)?box.querySelector('svg')
       :box.querySelector('.mermaid:not([hidden]) svg')||box.querySelector('svg.cw-ov');
   }
   function openZoom(box){
@@ -2023,6 +2026,7 @@ if(window.CW_LIVE){
     const clone=svg.cloneNode(true);
     clone.__navSource=svg; // focusNavNode/clearNavFocus mirror onto this, so fullscreen focus changes survive the dialog closing
     clone.style.minWidth=''; // the overview's inline min-width is for the page, not the dialog
+    zbody.classList.toggle('cw-vis',box.matches(PIC_SEL)); // the fragment's colours are --foreground etc., defined on .cw-vis
     zbody.replaceChildren(clone);
     const api=panZoom(clone,'modal');
     if(api&&clone.classList.contains('cw-ov')) api.reset(); // whole graph first, pinch in from there
@@ -2045,12 +2049,12 @@ if(window.CW_LIVE){
         if(e.key==='Enter'||e.key===' '){ e.preventDefault(); openZoom(box); }
       });
     }
-    if(pzWired.has(svg)) return;
+    if(pzWired.has(svg)||box.matches(PIC_SEL)) return; // a picture keeps its authored size inline; only the dialog pans
     panZoom(svg,'inline');
   }
   const DIAGRAM_SEL='.vd-symbols .mermaid';
   function wireAll(){
-    document.querySelectorAll(DIAGRAM_SEL).forEach(wire);
+    document.querySelectorAll(DIAGRAM_SEL+','+PIC_SEL).forEach(wire);
   }
   // mermaid renders asynchronously after startOnLoad, so watch for the svg to
   // appear instead of assuming it exists when this script runs. `hidden` is watched too: a

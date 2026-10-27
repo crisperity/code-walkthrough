@@ -376,13 +376,18 @@ def _secret_files():
     return sorted({os.path.realpath(p) for p in paths if os.path.exists(p)})
 
 
-def project_dir(home, cwd):
+def claude_dir(home, config_dir=None):
+    # The Claude Code config dir an agent run uses: the repo's configured one, else CLAUDE_CONFIG_DIR, else ~/.claude.
+    return Path(config_dir or os.environ.get("CLAUDE_CONFIG_DIR") or Path(home) / ".claude")
+
+
+def project_dir(home, cwd, config_dir=None):
     # Claude Code names a cwd's state dir after the path with every non-alphanumeric character replaced by '-'.
-    return Path(home) / ".claude" / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
+    return claude_dir(home, config_dir) / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
 
 
 def confine_prefix(worktree, repo_root, home, turns_dir, sockets=None, exists=os.path.exists,
-                   secrets=None):
+                   secrets=None, config_dir=None):
     """bwrap argv that makes everything but the worktree and turns dir read-only for a Full turn.
     The main repo root is an overlay: agent writes there succeed and are discarded, the daemon
     commits the worktree on the host afterwards. ~/.claude stays read-only except the agent cwd's own
@@ -413,8 +418,9 @@ def confine_prefix(worktree, repo_root, home, turns_dir, sockets=None, exists=os
     prefix += [
         "--bind", worktree, worktree, "--bind", turns_dir, turns_dir,
     ]
-    writable = [str(project_dir(home, worktree))] + [f"{home}/{rel}" for rel in (
-        ".claude/session-env", ".claude/sessions", ".claude/.credentials.json", ".local/share/rtk")]
+    cdir = claude_dir(home, config_dir)
+    writable = [str(project_dir(home, worktree, config_dir))] + [str(cdir / rel) for rel in (
+        "session-env", "sessions", ".credentials.json")] + [f"{home}/.local/share/rtk"]
     for path in writable:
         prefix += ["--bind-try", path, path]
     return prefix + ["--chdir", worktree, "--"]

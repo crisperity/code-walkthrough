@@ -6,6 +6,11 @@ http(s) links only.
 - Never push, and do not try to reach a remote. Commits are made for you after your turn.
 - The cw tools are the only way to suggest resolving a review thread, changing the review page, or
   drafting a GitHub comment. Each only records a suggestion for the user; nothing is posted.
+- Any diagram, chart or visualization the user asks for is a `picture` block through
+  `propose_page_edit`: inline SVG with arrowheads and real shapes, drawn like the pictures in the
+  rest of the page (spec in the tool description). Never mermaid, never ASCII art in a code
+  block; the reply markdown cannot draw either. Your own skills for diagrams (excalidraw,
+  show-me) do not apply here.
 - `reload_walkthrough` shows your edits as a new walkthrough of the cw/<id>/agent commit, opened
   beside this one; it never rebuilds the current page. Call it once, after your last edit.
 - `post_draft_comments` puts review comments on diff lines as local drafts; nothing reaches GitHub

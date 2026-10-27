@@ -1081,6 +1081,7 @@ def _claude_turn(d, record, profile, config, anchor, question, on_event, live, o
     if full:
         system += "\n\n" + (SKILL_DIR / "prompts" / "agent.md").read_text()
     mcp_config = cw_mcp.outcome_mcp_config(d, qid, mode)
+    cdir = None
     prior = _thread_session(d, thread_id, mode)
     write_turn_anchor(d, qid, thread_id, anchor, question, record["source"], anchors=anchors, mode=mode)
     if full and not cw_llm.confinement_available():
@@ -1095,9 +1096,10 @@ def _claude_turn(d, record, profile, config, anchor, question, on_event, live, o
                                     session_id=session_id, resume=resume)
             turns = d / "turns"
             turns.mkdir(exist_ok=True)
-            prefix = cw_llm.confine_prefix(cwd, cw_llm.overlay_root(cw_llm.git_common_dir(cwd)), Path.home(), turns)
+            prefix = cw_llm.confine_prefix(cwd, cw_llm.overlay_root(cw_llm.git_common_dir(cwd)), Path.home(), turns,
+                                           config_dir=cdir)
             if prefix:
-                cw_llm.project_dir(Path.home(), cwd).mkdir(parents=True, exist_ok=True)
+                cw_llm.project_dir(Path.home(), cwd, cdir).mkdir(parents=True, exist_ok=True)
             argv = prefix + argv
         else:
             argv = cw_llm.thread_argv(
@@ -1107,7 +1109,7 @@ def _claude_turn(d, record, profile, config, anchor, question, on_event, live, o
             argv, prompt, cwd=cwd, timeout=config["timeout_s"], qid=qid,
             thread_id=thread_id, on_event=on_event, live=live,
             sweep=lambda: sweep_outcomes(d, qid, thread_id, on_event),
-            env=cw_llm.no_push_env() if full else None)
+            env={**(cw_llm.no_push_env() if full else {}), **({"CLAUDE_CONFIG_DIR": cdir} if cdir else {})} or None)
 
     st = run(resume=prior) if prior else run(session_id=str(uuid.uuid4()))
     if prior and st["returncode"] != 0 and not st["init"] and not live.get("cancelled"):
