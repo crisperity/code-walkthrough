@@ -4305,7 +4305,7 @@ if(window.CW_LIVE){
       const send=mkBtn(tx.btn,'cw-send fb-primary');
       const row=mk('div','fb-actions'); row.append(send);
       const cancelBtn=mkBtn('Cancel','cw-cancel fb-ghost'); row.append(cancelBtn);
-      const hint=mk('span','cw-compose-hint','Esc closes, Ctrl+Enter saves');
+      const hint=mk('span','cw-compose-hint','Enter saves, Shift+Enter new line, Esc closes');
       const note=mk('p','cw-compose-note'); note.append(mk('span',null,tx.note),hint);
       const status=mk('p','cw-compose-status'); status.setAttribute('role','status');
       const prompt=mk('div','fb-actions cw-discard'); prompt.hidden=true;
@@ -4338,7 +4338,7 @@ if(window.CW_LIVE){
       dropBtn.addEventListener('click',()=>onCancel());
       ta.addEventListener('input',sync);
       ta.addEventListener('keydown',e=>{
-        if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){ e.preventDefault(); act(); }
+        if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing&&e.keyCode!==229){ e.preventDefault(); act(); }
       });
       sync();
       return {box,ta,send,isEmpty,prompting,keepEditing,cancel,nudge,sync};
@@ -5605,7 +5605,7 @@ if(window.CW_LIVE){
         if(e.ctrlKey&&!e.metaKey&&k==='y'){ e.preventDefault(); edUndo(ed,true); return; }
         if(e.key==='Enter'){
           e.preventDefault();
-          if(mod){ if(ed.onSend) ed.onSend(); } else edInsertText(ed,'\n');
+          if(e.shiftKey&&!mod) edInsertText(ed,'\n'); else if(ed.onSend) ed.onSend();
           return;
         }
         if(e.key==='Backspace'&&edDelAdjacent(ed,-1)) e.preventDefault();
@@ -5660,7 +5660,7 @@ if(window.CW_LIVE){
       const box=mk('div','cw-compose'); box.dataset.mode='agent';
       const send=mkBtn('Send','cw-send fb-primary');
       const row=mk('div','fb-actions'); row.append(send);
-      const note=mk('p','cw-compose-note'); note.append(mk('span','cw-compose-hint','Ctrl+Enter sends'));
+      const note=mk('p','cw-compose-note'); note.append(mk('span','cw-compose-hint','Enter sends, Shift+Enter new line'));
       const status=mk('p','cw-compose-status'); status.setAttribute('role','status');
       box.append(ed.el,row,note,status);
       const c={box,send,status,busy:false,sync:()=>{ send.disabled=c.busy||ed.isEmpty(); }};
