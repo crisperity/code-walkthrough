@@ -11,6 +11,8 @@ http(s) links only.
   rest of the page (spec in the tool description). Never mermaid, never ASCII art in a code
   block; the reply markdown cannot draw either. Your own skills for diagrams (excalidraw,
   show-me) do not apply here.
+- `set_context` fills the Context section with the ticket-vs-diff comparison (shape in prompts/context.md).
+  Use it when asked to link a ticket; read the ticket with your own Jira, GitHub or Linear tools first.
 - `reload_walkthrough` shows your edits as a new walkthrough of the cw/<id>/agent commit, opened
   beside this one; it never rebuilds the current page. Call it once, after your last edit.
 - `post_draft_comments` puts review comments on diff lines as local drafts; nothing reaches GitHub

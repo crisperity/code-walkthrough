@@ -326,13 +326,16 @@ mermaid edits still render. The graph has to pass `check_overview`, which measur
 persisted in `qa.jsonl`. Undo reverts it and Redo reapplies it; the agent is told about either on
 the next turn. Page edits are not offered on diff-line comments.
 
-The Context section's empty state has a field for a ticket URL or key (`AO-82`, `#123`, `owner/repo#123`).
-Submitting it posts to `/api/walkthrough/<key>/<id>/ticket`, which the daemon never fetches itself: it only
-adds a handed task ("Link ticket and fill the Context section") to the Threads dock, refused on a sibling
-view, while building and in explain mode. Your own session fetches the ticket, compares it with the diff
-per `prompts/context.md` and calls `walkthrough_reply(id, thread_id, oid, text, context)`. `context` may
-also come alone, without `thread_id` and `text`. It is capped at 16 KB, cleaned by `render.clean_context`,
-written to `context.json` and re-rendered, unless a build is running, which renders it instead.
+The Context section fills itself when the build detects a ticket key (branch, PR text or commits) and Full
+may run on the walkthrough (own PR or trusted repo): the daemon starts a Full turn on the chosen agent that
+reads the ticket with the user's own Jira, GitHub or Linear tools, compares it with the diff per
+`prompts/context.md` and calls the `set_context` outcome tool, which writes `context.json` and re-renders.
+It runs once per detected key; the Context skeleton links to that thread while it works. The empty state's
+field for a ticket URL or key (`AO-82`, `#123`, `owner/repo#123`) posts to `/api/walkthrough/<key>/<id>/ticket`,
+which starts the same turn, or, where Full is off, adds a handed task ("Link ticket and fill the Context
+section") for your own session, which then calls `walkthrough_reply(id, thread_id, oid, text, context)`. `context`
+may also come alone, without `thread_id` and `text`. Either way it is capped at 16 KB, cleaned by
+`render.clean_context`, written to `context.json` and re-rendered, unless a build is running, which renders it instead.
 
 In `walkthrough_get` threads each outcome carries `summary`: a string for task, github_draft, resolve and
 draft_comments, and an object for a page edit: `{op, target, target_is_oid, type, text}` for prose and

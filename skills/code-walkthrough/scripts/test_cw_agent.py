@@ -665,3 +665,31 @@ def test_chosen_agent_is_remembered_for_the_repo_and_as_default(tmp_path, monkey
     assert cw_agent.current_agent({"gh_repo": "acme/api"}, config) == agent        # same repo, new walkthrough
     assert cw_agent.current_agent({"gh_repo": "other/repo"}, config) == agent      # falls back to the last choice
     assert cw_agent.current_agent({"gh_repo": "acme/api", "claude": {"config_dir": "/x", "model": "haiku"}}, config) == agent  # stale pin ignored
+
+
+def test_detected_ticket_is_fetched_by_a_full_turn_that_fills_context_once():
+    ctx = {"ticket": {"source": "jira", "key": "AO-82", "title": "T"}, "purpose": "P",
+           "items": [{"status": "covered", "text": "a", "ref": None}], "gaps": []}
+    with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
+        ask, d, _repo = _full_fixture(tmp, home, status="done", ticket_hint={"key": "AO-82", "found_in": "branch"})
+        entry = cw_testlib.claude_stream_entry(["linked"], mcp_calls=[
+            {"at": 1, "name": "set_context", "arguments": {"context": ctx}}])
+        with cw_testlib.fake_claude(tmp, {"sonnet": [entry]}) as fc, cw_testlib.running_daemon() as daemon:
+            qid = daemon.maybe_link_ticket(d.parent.name, d.name, d)
+            assert qid and cw_store.read_meta(d)["ticket_hint"]["run"] == qid
+            ask._wait_final(d, 1)
+            assert daemon.maybe_link_ticket(d.parent.name, d.name, d) is None   # once per hint
+        turn = cw_ask.read_qa(d)[0]
+        assert turn["mode"] == "full" and turn["source"] == "auto" and "Link ticket AO-82" in turn["question"]
+        assert cw_store.read_json(d / "context.json")["ticket"]["key"] == "AO-82"
+        assert any("--setting-sources" in e["argv"] for e in fc.log())
+
+
+def test_ticket_is_not_fetched_without_full_access_or_with_context():
+    with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
+        ask, d, _repo = _full_fixture(tmp, home, status="done", own_pr=False, ticket_hint={"key": "AO-82"})
+        with cw_testlib.running_daemon() as daemon:
+            assert daemon.maybe_link_ticket(d.parent.name, d.name, d) is None    # repo not trusted
+            cw_store.update_meta(d, lambda m: m.update(own_pr=True))
+            cw_store.write_json(d / "context.json", {"purpose": "x"})
+            assert daemon.maybe_link_ticket(d.parent.name, d.name, d) is None    # already compared

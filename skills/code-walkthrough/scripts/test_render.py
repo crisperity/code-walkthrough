@@ -1637,7 +1637,9 @@ def test_ticket_hint_shows_a_skeleton_card_with_the_key_not_the_link_form():
 
 def test_ticket_hint_is_escaped_and_capped_and_junk_is_dropped():
     assert clean_ticket_hint({"key": "x" * 200, "found_in": "nowhere", "at": "soon"}) == {
-        "key": "x" * 80, "found_in": None, "at": None}
+        "key": "x" * 80, "found_in": None, "at": None, "run": None}
+    assert clean_ticket_hint({"key": "A-1", "run": "q-0123abcd"})["run"] == "q-0123abcd"
+    assert clean_ticket_hint({"key": "A-1", "run": "q-1\"><script>"})["run"] is None
     assert clean_ticket_hint({"key": "A-1", "found_in": ["branch"], "at": 5.5})["found_in"] is None
     assert clean_ticket_hint({"key": "A-1", "found_in": "branch", "at": 7})["at"] == 7
     assert all(clean_ticket_hint({"key": "A-1", "at": v})["at"] is None for v in (float("inf"), float("nan")))
@@ -1652,11 +1654,13 @@ def test_template_arms_the_hint_skeleton_to_become_the_prefilled_link_form_after
     arm = tpl[tpl.index("function armCtxHint()"):]
     arm = arm[:arm.index("armCtxHint();")]
 
-    assert "120000-(Date.now()-at*1000)" in arm and "sec.dataset.hintAt" in arm and "sec.__cwTimer=setTimeout" in arm
+    assert "run?600000:120000" in arm and "wait-(Date.now()-at*1000)" in arm and "sec.dataset.hintAt" in arm and "sec.__cwTimer=setTimeout" in arm
     assert "sec.isConnected" in arm and "wireCtxLink(form)" in arm and ".value=sec.dataset.ticketHint" in arm
     _order, files = parsed()
     out = context_html(None, files, "", False, {"key": "TD-1", "found_in": None, "at": 1700000000.9})
-    assert 'data-hint-at="1700000000"' in out
+    assert 'data-hint-at="1700000000"' in out and "data-hint-run" not in out
+    out = context_html(None, files, "", False, {"key": "TD-1", "found_in": None, "at": None, "run": "q-0123abcd"})
+    assert 'data-hint-run="q-0123abcd"' in out and "Fetching the ticket with your agent" in out
 
 
 def test_live_rebuilt_bursts_coalesce_and_swap_in_place_with_reload_only_for_bound_blocks():

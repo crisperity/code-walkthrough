@@ -357,7 +357,10 @@ def thread_argv(profile, system, *, mcp_config, add_dir, session_id=None, resume
 FULL_DISALLOWED = ",".join((
     "Bash(git push:*)", "Bash(rtk git push:*)", "Bash(git -c:*)", "Bash(git --no-pager push:*)",
     "Bash(env:*)", "Bash(*GIT_CONFIG*)", "Bash(gh pr create:*)", "Bash(gh pr review:*)",
-    "Bash(gh pr merge:*)", "Bash(gh pr comment:*)", "Bash(gh issue:*)", "Bash(gh api:*)",
+    "Bash(gh pr merge:*)", "Bash(gh pr comment:*)", "Bash(gh api:*)",
+    # gh issue view stays allowed so a ticket on GitHub can be read; everything that changes an issue is not.
+    *(f"Bash(gh issue {v}:*)" for v in ("create", "edit", "comment", "close", "reopen", "delete", "transfer",
+                                         "lock", "unlock", "pin", "unpin", "develop")),
     "mcp__code-walkthrough", "mcp__plugin_code-walkthrough_code-walkthrough",
     "WebFetch", "WebSearch",
 ))
