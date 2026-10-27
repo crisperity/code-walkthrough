@@ -51,8 +51,9 @@ def test_live_payload_agent_defaults_off(tmp_path, monkeypatch):
         "reason": "Full access is off for this walkthrough", "fixable": "trust", "repo": "a/b", "org": "a",
         "remedy": "Trust this repo from the Threads panel, or add it to trust.repos in config.json"}
     live = cw_server._live_payload("k", "w", {"gh_repo": "a/b", "own_pr": True}, tmp_path, "tok", 1)
-    assert live["agent"] == {"full": True, "own_pr": True, "stale": False, "full_off": None,
-                             "trusted": {"by": "own_pr", "value": None}}
+    assert {k: live["agent"][k] for k in ("full", "own_pr", "stale", "full_off", "trusted")} == {
+        "full": True, "own_pr": True, "stale": False, "full_off": None, "trusted": {"by": "own_pr", "value": None}}
+    assert live["agent"]["picker"]["models"] == ["haiku", "sonnet", "opus"] and live["agent"]["picker"]["repo"] == "a/b"
     monkeypatch.setattr(cw_server.cw_llm, "confinement_available", lambda: False)
     live = cw_server._live_payload("k", "w", {"gh_repo": "a/b", "own_pr": True}, tmp_path, "tok", 1)
     assert live["agent"]["full"] is False and live["agent"]["full_off"]["fixable"] is None
@@ -647,3 +648,68 @@ def test_a_dirty_worktree_at_the_head_survives_a_refresh():
         assert not cw_agent.has_edits(d, old) and cw_agent.is_dirty(d)
         assert cw_run._full_clean(d, old, repo) == {"agent": old["agent"]}
         assert (wt / "a.py").read_text() == "x = 3\n"
+
+
+def test_chosen_agent_is_remembered_for_the_repo_and_as_default(tmp_path, monkeypatch):
+    monkeypatch.setenv("CODE_WALKTHROUGH_HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    monkeypatch.setattr(cw_agent.cw_llm, "claude_profiles", lambda home=None: [{"dir": "/c/work", "label": "work"}])
+    d = tmp_path / "w"
+    d.mkdir()
+    cw_store.write_json(d / "meta.json", {"gh_repo": "Acme/Api"})
+    agent = {"config_dir": "/c/work", "model": "haiku"}
+    cw_agent.choose_agent(d, agent)
+    assert cw_store.read_meta(d)["claude"] == agent
+    config = cw_store.load_config()
+    assert config["agent_rules"] == {"last": agent, "repos": {"acme/api": agent}}
+    assert cw_agent.current_agent({"gh_repo": "acme/api"}, config) == agent        # same repo, new walkthrough
+    assert cw_agent.current_agent({"gh_repo": "other/repo"}, config) == agent      # falls back to the last choice
+    assert cw_agent.current_agent({"gh_repo": "acme/api", "claude": {"config_dir": "/x", "model": "haiku"}}, config) == agent  # stale pin ignored
+
+
+def test_detected_ticket_is_fetched_by_a_full_turn_that_fills_context_once():
+    ctx = {"ticket": {"source": "jira", "key": "AO-82", "title": "T"}, "purpose": "P",
+           "items": [{"status": "covered", "text": "a", "ref": None}], "gaps": []}
+    with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
+        ask, d, _repo = _full_fixture(tmp, home, status="done", ticket_hint={"key": "AO-82", "found_in": "branch"})
+        entry = cw_testlib.claude_stream_entry(["linked"], mcp_calls=[
+            {"at": 1, "name": "set_context", "arguments": {"context": ctx}}])
+        with cw_testlib.fake_claude(tmp, {"sonnet": [entry]}) as fc, cw_testlib.running_daemon() as daemon:
+            qid = daemon.maybe_link_ticket(d.parent.name, d.name, d)
+            assert qid and cw_store.read_meta(d)["ticket_hint"]["run"] == qid
+            ask._wait_final(d, 1)
+            assert daemon.maybe_link_ticket(d.parent.name, d.name, d) is None   # once per hint
+        turn = cw_ask.read_qa(d)[0]
+        assert turn["mode"] == "full" and turn["source"] == "auto" and "Link ticket AO-82" in turn["question"]
+        assert cw_store.read_json(d / "context.json")["ticket"]["key"] == "AO-82"
+        assert any("--setting-sources" in e["argv"] for e in fc.log())
+
+
+def test_ticket_is_not_fetched_without_full_access_or_with_context():
+    with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
+        ask, d, _repo = _full_fixture(tmp, home, status="done", own_pr=False, ticket_hint={"key": "AO-82"})
+        with cw_testlib.running_daemon() as daemon:
+            assert daemon.maybe_link_ticket(d.parent.name, d.name, d) is None    # repo not trusted
+            cw_store.update_meta(d, lambda m: m.update(own_pr=True))
+            cw_store.write_json(d / "context.json", {"purpose": "x"})
+            assert daemon.maybe_link_ticket(d.parent.name, d.name, d) is None    # already compared
+
+
+def test_approved_mcp_tools_reach_later_full_turns_and_only_mcp_names_are_accepted():
+    with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
+        ask, d, _repo = _full_fixture(tmp, home)
+        path = f"/api/walkthrough/{d.parent.name}/{d.name}/approve"
+        with cw_testlib.fake_claude(tmp, {"sonnet": [cw_testlib.claude_stream_entry(["ok"])]}) as fc, \
+                cw_testlib.running_daemon() as daemon:
+            def post(tools):
+                return cw_testlib.request(daemon, "POST", path, token=daemon.token, body=json.dumps({"tools": tools}))[0]
+            assert post(["Bash(rm -rf:*)"]) == 400 and post([]) == 400 and post("mcp__x__y") == 400
+            assert post(["mcp__plugin_core_axon__jira-get-issue"]) == 200
+            assert post(["mcp__plugin_core_axon__jira-get-issue"]) == 200          # no duplicate
+            assert _comment(ask, daemon, d, "full")[0] == 202
+            ask._wait_final(d, 1)
+        approved = list(cw_store.load_config()["approved_tools"].values())
+        assert approved == [["mcp__plugin_core_axon__jira-get-issue"]]
+        argv = next(e["argv"] for e in fc.log() if "--setting-sources" in e["argv"])
+        allowed = next(a for a in argv if a.startswith("--allowedTools="))
+        assert "mcp__plugin_core_axon__jira-get-issue" in allowed and "mcp__cw__set_context" in allowed

@@ -593,7 +593,8 @@ def test_full_disallows_web_tools():
     assert {"WebFetch", "WebSearch"} <= set(cw_llm.FULL_DISALLOWED.split(","))
 
 
-def test_confine_prefix():
+def test_confine_prefix(monkeypatch):
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     h = "/home/u"
     assert cw_llm.confine_prefix("/w/d/agent", "/r", h, "/w/d/turns", sockets=["/run/docker.sock"],
                                  exists=lambda p: True, secrets=["/w/d/token"]) == [
@@ -615,9 +616,62 @@ def test_confine_prefix():
     ]
 
 
-def test_project_dir_matches_claude_codes_encoding():
+def test_project_dir_matches_claude_codes_encoding(monkeypatch):
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     assert cw_llm.project_dir("/home/u", "/home/u/.t3/work_trees/a b") == Path(
         "/home/u/.claude/projects/-home-u--t3-work-trees-a-b")
+
+
+def test_claude_state_follows_claude_config_dir(monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/home/u/.claude-private")
+    assert cw_llm.project_dir("/home/u", "/w/a") == Path("/home/u/.claude-private/projects/-w-a")
+    argv = cw_llm.confine_prefix("/w/d/agent", "/r", "/home/u", "/w/d/turns", sockets=[], exists=lambda p: False)
+    assert "/home/u/.claude-private/sessions" in argv and "/home/u/.claude/sessions" not in argv
+
+
+def _setups(tmp_path):
+    for name, marker in ((".claude", "settings.json"), (".claude-private", ".credentials.json"), (".claude-empty", "x")):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / marker).write_text("{}")
+    return str(tmp_path / ".claude"), str(tmp_path / ".claude-private")
+
+
+def test_claude_profiles_names_hides_and_valid_agent(tmp_path, monkeypatch):
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    work, private = _setups(tmp_path)
+    profiles = cw_llm.claude_profiles(tmp_path, config={})
+    assert [p["label"] for p in profiles] == [".claude", ".claude-private"]
+    config = {"setups": {work: {"name": "Acme"}, private: {"hidden": True}}}
+    profiles = cw_llm.claude_profiles(tmp_path, config=config)
+    assert [(p["label"], p["named"]) for p in profiles] == [("Acme", True)]
+    assert len(cw_llm.claude_profiles(tmp_path, config=config, include_hidden=True)) == 2
+    ok = {"config_dir": work, "model": "haiku"}
+    assert cw_llm.valid_agent(ok, profiles) == ok
+    assert cw_llm.valid_agent({**ok, "config_dir": private}, profiles) is None  # hidden
+    assert cw_llm.valid_agent({**ok, "config_dir": "/etc"}, profiles) is None
+    assert cw_llm.valid_agent({**ok, "model": "gpt"}, profiles) is None
+
+
+def test_setup_skills_and_missing_skill(tmp_path, monkeypatch):
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    monkeypatch.setattr(cw_llm.Path, "home", lambda: tmp_path)
+    work, private = _setups(tmp_path)
+    plugin = tmp_path / "cache" / "core"
+    (plugin / "skills" / "check-pr").mkdir(parents=True)
+    (plugin / "skills" / "check-pr" / "SKILL.md").write_text("x")
+    (tmp_path / ".claude" / "settings.json").write_text('{"enabledPlugins": {"core@m": true, "off@m": false}}')
+    (tmp_path / ".claude" / "plugins").mkdir()
+    (tmp_path / ".claude" / "plugins" / "installed_plugins.json").write_text(
+        '{"plugins": {"core@m": [{"installPath": "%s"}]}}' % plugin)
+    (tmp_path / ".claude-private" / "commands").mkdir()
+    (tmp_path / ".claude-private" / "commands" / "notes.md").write_text("x")
+    assert cw_llm.setup_skills(work) == ["check-pr"] and cw_llm.setup_skills(private) == ["notes"]
+    monkeypatch.setattr(cw_llm, "setup_info", lambda d: {"skills": cw_llm.setup_skills(d)})
+    monkeypatch.setattr(cw_llm, "claude_profiles", lambda **k: [{"dir": work, "label": "Acme"}, {"dir": private, "label": "Me"}])
+    assert cw_llm.missing_skill("run /core:check-pr, see /home/x", private) == {
+        "skill": "check-pr", "alt": work, "alt_label": "Acme"}
+    assert cw_llm.missing_skill("/check-pr", work) is None
+    assert cw_llm.missing_skill("no slash here", private) is None
 
 
 def test_confine_prefix_masks_only_existing_paths():

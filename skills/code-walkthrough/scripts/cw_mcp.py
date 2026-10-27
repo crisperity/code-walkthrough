@@ -577,7 +577,29 @@ def _page_edit_payload(args, anchor_doc=None):
             "block": {"type": block["type"], "text": block["text"].strip()}}
 
 
+def _check_context(anchor_doc, args, already):
+    import render
+    ctx = args.get("context")
+    try:
+        if not isinstance(ctx, dict) or len(json.dumps(ctx)) > 16 * 1024:
+            return "context must be an object of at most 16384 characters"
+    except (ValueError, RecursionError):
+        return "context must be plain JSON"
+    clean, problems = render.clean_context(ctx)
+    return None if clean is not None else "context has nothing usable: " + "; ".join(problems[:5])
+
+
+def _context_payload(args, anchor_doc=None):
+    import render
+    return render.clean_context(args["context"])[0]
+
+
 FULL_ONLY_TOOLS = [{
+    "name": "set_context",
+    "description": ("Fill the walkthrough's Context section with the ticket-vs-diff comparison. `context` has the "
+                    "shape in the code-walkthrough skill's prompts/context.md. Call it once, after you read the ticket."),
+    "inputSchema": {"type": "object", "required": ["context"], "properties": {"context": {"type": "object"}}},
+}, {
     "name": "reload_walkthrough",
     "description": ("Show your edits from this turn as a new walkthrough of the agent branch, opened beside "
                     "this one. The current walkthrough is never rebuilt. Call it once, after your last edit."),
@@ -608,6 +630,10 @@ OUTCOME_KINDS = {
         "payload": _draft_comments_payload, "key": lambda payload: "draft_comments",
         "accepted": "added to the page as local drafts; the user can edit or remove them and nothing was posted to GitHub",
     },
+    "set_context": {
+        "outcome": "context", "state": "applied", "check": _check_context, "payload": _context_payload,
+        "key": lambda payload: "context", "accepted": "shown in the Context section",
+    },
     "reload_walkthrough": {
         "outcome": "reload", "state": "requested", "check": _check_reload,
         "payload": lambda args, anchor_doc=None: {}, "key": lambda payload: "reload",
@@ -620,7 +646,7 @@ def check_outcome(anchor_doc, name, args, already=()):
     kind = OUTCOME_KINDS.get(name)
     if kind is None:
         return f"unknown tool {name}"
-    if name not in ("post_draft_comments", "reload_walkthrough") and all(r.get("kind") == "free" for r in _refs(anchor_doc)):
+    if name not in ("post_draft_comments", "reload_walkthrough", "set_context") and all(r.get("kind") == "free" for r in _refs(anchor_doc)):
         return "this comment has no reference (no diff line, prose block or review thread), so this tool cannot be used; reply instead"
     return kind["check"](anchor_doc, args if isinstance(args, dict) else {}, already)
 

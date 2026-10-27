@@ -303,7 +303,7 @@ def test_outcomes_server_accepts_and_rejects():
 def test_outcome_server_lists_tools_by_mode():
     review = ["propose_resolve", "propose_page_edit", "propose_github_draft", "propose_task", "post_draft_comments"]
     full = ["propose_resolve", "propose_page_edit", "propose_github_draft", "post_draft_comments",
-            "reload_walkthrough"]
+            "set_context", "reload_walkthrough"]
     assert [t["name"] for t in cw_mcp.outcome_tools()] == review
     assert [t["name"] for t in cw_mcp.outcome_tools("full")] == full
     assert "--mode" not in cw_mcp.outcome_mcp_config("/d", "q1")["mcpServers"]["cw"]["args"]
@@ -700,3 +700,13 @@ def test_service_install_writes_unit_and_spawn_goes_through_systemd():
         finally:
             for k, v in old.items():
                 os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+
+
+def test_set_context_outcome_cleans_and_needs_no_reference():
+    good = {"ticket": {"source": "jira", "key": "AO-82", "title": "T", "url": "https://x.atlassian.net/browse/AO-82"},
+            "purpose": "P", "items": [{"status": "covered", "text": "a", "ref": None}], "gaps": []}
+    anchor = {"anchors": [{"kind": "free", "quote": ""}]}
+    assert cw_mcp.check_outcome(anchor, "set_context", {"context": good}) is None
+    assert cw_mcp._context_payload({"context": good})["ticket"]["key"] == "AO-82"
+    assert "object" in cw_mcp.check_outcome(anchor, "set_context", {"context": "AO-82"})
+    assert "16384" in cw_mcp.check_outcome(anchor, "set_context", {"context": {"purpose": "y" * 17000}})

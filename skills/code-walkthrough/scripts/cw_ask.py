@@ -483,6 +483,7 @@ _TRANSITIONS = {
     ("github_draft", "verbatim"): ("proposed", "proposed"),
     ("page_edit", "revert"): ("applied", "reverted"),
     ("page_edit", "reapply"): ("reverted", "applied"),
+    ("page_edit", "keep"): ("applied", "applied"),
     ("draft_comments", "keep"): ("applied", "kept"),
     ("draft_comments", "dismiss"): (("applied", "kept"), "dismissed"),
     ("task", "dismiss"): (("proposed", "handed"), "dismissed"),
@@ -514,6 +515,9 @@ def _outcome_action(d, oid, action, payload, on_event):
     event = {"type": "state", "oid": oid, "by": "user", "at": cw_store.now_iso(), "state": to_state}
     if current["outcome"] == "github_draft" and action in ("edit", "keep", "verbatim"):
         event["payload"] = _github_draft_payload(current["payload"], action, payload, d, current["qid"])
+    elif current["outcome"] == "page_edit" and action in ("keep", "revert"):
+        # Kept = part of the page, shown without the suggestion frame; undo clears it.
+        event["payload"] = {**current["payload"], "kept": action == "keep"}
     elif current["outcome"] == "draft_comments" and action == "keep":
         note_ids = (payload or {}).get("note_ids")
         if note_ids is not None:
@@ -670,7 +674,8 @@ def _outcome_updates_text(d, thread_id, since_last_turn=True):
             continue
         payload = r.get("payload") or o["payload"]
         if o["outcome"] == "page_edit":
-            verb = "undid" if r.get("state") == "reverted" else "redid"
+            verb = ("undid" if r.get("state") == "reverted" else
+                    "kept" if (r.get("payload") or {}).get("kept") else "redid")
             if _OID_TARGET_RE.fullmatch(str(payload["target"])):
                 lines.append(f"The user {verb} your edit {payload['target']} replacement ({payload['op']})")
             else:
@@ -1081,6 +1086,8 @@ def _claude_turn(d, record, profile, config, anchor, question, on_event, live, o
     if full:
         system += "\n\n" + (SKILL_DIR / "prompts" / "agent.md").read_text()
     mcp_config = cw_mcp.outcome_mcp_config(d, qid, mode)
+    agent = cw_llm.valid_agent((cw_store.read_meta(d) or {}).get("claude"))
+    cdir = agent and agent["config_dir"]
     prior = _thread_session(d, thread_id, mode)
     write_turn_anchor(d, qid, thread_id, anchor, question, record["source"], anchors=anchors, mode=mode)
     if full and not cw_llm.confinement_available():
@@ -1090,14 +1097,16 @@ def _claude_turn(d, record, profile, config, anchor, question, on_event, live, o
 
     def run(session_id=None, resume=None):
         if full:
-            allowed = ",".join(MCP_PREFIX + t["name"] for t in cw_mcp.outcome_tools("full"))
+            allowed = ",".join([MCP_PREFIX + t["name"] for t in cw_mcp.outcome_tools("full")]
+                               + cw_llm.approved_tools(config, cdir))
             argv = cw_llm.full_argv(profile, system, mcp_config=mcp_config, allowed=allowed, add_dir=ctx,
                                     session_id=session_id, resume=resume)
             turns = d / "turns"
             turns.mkdir(exist_ok=True)
-            prefix = cw_llm.confine_prefix(cwd, cw_llm.overlay_root(cw_llm.git_common_dir(cwd)), Path.home(), turns)
+            prefix = cw_llm.confine_prefix(cwd, cw_llm.overlay_root(cw_llm.git_common_dir(cwd)), Path.home(), turns,
+                                           config_dir=cdir)
             if prefix:
-                cw_llm.project_dir(Path.home(), cwd).mkdir(parents=True, exist_ok=True)
+                cw_llm.project_dir(Path.home(), cwd, cdir).mkdir(parents=True, exist_ok=True)
             argv = prefix + argv
         else:
             argv = cw_llm.thread_argv(
@@ -1107,7 +1116,7 @@ def _claude_turn(d, record, profile, config, anchor, question, on_event, live, o
             argv, prompt, cwd=cwd, timeout=config["timeout_s"], qid=qid,
             thread_id=thread_id, on_event=on_event, live=live,
             sweep=lambda: sweep_outcomes(d, qid, thread_id, on_event),
-            env=cw_llm.no_push_env() if full else None)
+            env={**(cw_llm.no_push_env() if full else {}), **({"CLAUDE_CONFIG_DIR": cdir} if cdir else {})} or None)
 
     st = run(resume=prior) if prior else run(session_id=str(uuid.uuid4()))
     if prior and st["returncode"] != 0 and not st["init"] and not live.get("cancelled"):
@@ -1210,13 +1219,18 @@ def answer(d, qid, anchor, question, on_event=None, thread_id=None, live=None, s
 
     try:
         config = cw_store.load_config()
-        profile = cw_store.role_profile(config, "thread")
+        profile = cw_store.role_profile(config, "thread", agent=cw_llm.valid_agent((cw_store.read_meta(d) or {}).get("claude")))
         if profile is None:
             record.update(status="error", error="no thread role",
                           remedy="set roles.thread or roles.ask in config.json")
         else:
             record["profile"] = profile.get("name")
             record["model"] = profile.get("model")
+            if profile.get("kind") == "claude-code":
+                cdir = profile.get("config_dir") or str(cw_llm.claude_dir(Path.home()).resolve())
+                record["setup"] = cw_llm.setup_label(cdir, config)
+                if mode == "full":
+                    record["missing_skill"] = cw_llm.missing_skill(question, cdir, config)
             usage_hook = cw_run._make_on_usage(d, "thread", on_event, config)
 
             def on_usage(usage):

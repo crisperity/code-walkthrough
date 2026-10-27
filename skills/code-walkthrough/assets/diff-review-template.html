@@ -790,7 +790,8 @@
     background:var(--purple)}
   .cw-ref-dot-btn:hover::after{box-shadow:0 0 0 3px color-mix(in srgb,var(--purple) 30%,transparent)}
   .cw-ref-dot-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px;border-radius:50%}
-  .cw-ref-dot:not(.dline){box-shadow:-6px 0 0 -3px var(--purple)}
+  .cw-ref-dot:not(.dline){position:relative}
+  .cw-ref-dot:not(.dline)>.cw-ref-dot-btn{left:-20px;top:.75em}
   #cw-toast{position:fixed;left:50%;transform:translateX(-50%);bottom:64px;z-index:52;
     display:flex;align-items:center;gap:10px;box-sizing:border-box;width:max-content;max-width:min(420px,calc(100vw - 32px));
     padding:8px 12px;border:1px solid var(--purple);border-radius:8px;background:var(--panel2);color:var(--text);
@@ -921,9 +922,18 @@
   }
   @keyframes cw-dot{0%,80%,100%{opacity:.25}40%{opacity:1}}
   .cw-caret{display:inline-block;width:2px;height:1em;margin-left:1px;vertical-align:text-bottom;background:var(--purple)}
-  .cw-pageedit{display:block;box-sizing:border-box;max-width:100%;margin:8px 0;padding:8px 10px;
-    border-left:3px solid var(--purple);background:color-mix(in srgb,var(--purple) 6%,transparent);
+  .cw-pageedit{display:block;box-sizing:border-box;max-width:100%;margin:14px 0;padding:12px 14px 14px;
+    border:1px dashed color-mix(in srgb,var(--purple) 70%,transparent);border-radius:12px;
+    background:color-mix(in srgb,var(--purple) 5%,transparent);
     white-space:normal;overflow-wrap:anywhere}
+  .cw-pageedit.cw-kept{position:relative;padding:0;border:0;border-radius:0;background:none}
+  .cw-pageedit-bar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin-bottom:10px;
+    color:var(--muted);font:var(--fs-xs)/1.4 system-ui,sans-serif}
+  .cw-pageedit-bar b{color:var(--text);font-weight:600}
+  .cw-pageedit-bar .cw-grow{flex:1}
+  .cw-kept .cw-pageedit-bar{margin:4px 0 0;opacity:0;transition:opacity .15s}
+  .cw-kept:hover .cw-pageedit-bar,.cw-kept:focus-within .cw-pageedit-bar{opacity:1}
+  .cw-pageedit .cw-vis svg{max-width:100%}
   .cw-pageedit-label{margin:0 0 4px;color:var(--muted);font:var(--fs-xs)/1.4 system-ui,sans-serif}
   .cw-pageedit-chip{margin-left:8px;padding:0 6px;border:1px solid var(--border);border-radius:10px}
   .cw-pageedit-body>:first-child{margin-top:0}
@@ -1040,7 +1050,38 @@
   .cw-compose-note{margin:6px 0 0;font-size:var(--fs-xs);color:var(--muted)}
   .cw-compose-hint::before{content:" ";white-space:pre}
   .cw-compose-status{min-height:1.2em;font-size:var(--fs-xs);color:var(--muted);margin:4px 0 0}
-  #cw-panel-compose .cw-compose{margin:0;padding:10px 14px;border-left:0;border-top:1px solid var(--border);background:none}
+  #cw-panel-compose .cw-compose{margin:0;padding:8px 12px 12px;border-left:0;background:none}
+  #cw-panel-title{display:block;-webkit-line-clamp:unset;line-clamp:unset}
+  .cw-pt-main{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .cw-pt-sub{display:block;font:400 var(--fs-xs)/1.4 var(--mono);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .cw-panel-icon.cw-ghost{background:none;border-color:transparent;color:var(--muted)}
+  .cw-panel-icon.cw-ghost:hover,.cw-panel-icon.cw-ghost[aria-expanded="true"]{background:var(--panel2);color:var(--text)}
+  .cw-more{position:relative;flex:none}
+  .cw-more-pop{position:absolute;right:0;top:34px;z-index:5;min-width:230px;padding:6px;background:var(--panel2);
+    border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 28px rgba(0,0,0,.35);font-weight:400}
+  .cw-more-pop button{display:block;width:100%;text-align:left;padding:8px 10px;border:0;border-radius:7px;background:none;
+    color:var(--text);font:inherit;font-size:var(--fs-sm);cursor:pointer}
+  .cw-more-pop button:hover,.cw-more-pop button:focus-visible{background:var(--panel);outline:0}
+  .cw-more-pop small{display:block;color:var(--muted);font-size:var(--fs-xs)}
+  .cw-more-pop .cw-danger{color:var(--red)}
+  .cw-access-slot{display:contents}
+  .cw-access-pill{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:999px;
+    background:color-mix(in srgb,var(--green) 14%,transparent);color:var(--green)}
+  .cw-access-pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+  #cw-panel-body .cw-thread{border-left:0;background:none;padding:0}
+  #cw-panel-body .cw-turn{display:flex;flex-direction:column;gap:6px;margin:14px 0}
+  #cw-panel-body .cw-turn-q{align-self:flex-end;max-width:85%;padding:8px 12px;border-radius:14px 14px 4px 14px;
+    background:color-mix(in srgb,var(--text) 8%,transparent);color:var(--text);font-style:normal}
+  #cw-panel-body .cw-turn-a{margin:0}
+  .cw-compose-box{border:1px solid var(--border);border-radius:14px;background:var(--panel2);padding:6px 8px 8px 10px}
+  .cw-compose-box:focus-within{border-color:var(--accent)}
+  .cw-compose-box .cw-ed{border:0;background:none;min-height:3em;padding:4px 2px}
+  .cw-compose-box .cw-ed:focus-visible{outline:0}
+  .cw-compose-row{display:flex;align-items:center;gap:8px}
+  .cw-compose-row .cw-compose-note{flex:1;margin:0}
+  .cw-compose .cw-send.cw-round{display:grid;place-items:center;width:32px;height:32px;min-width:0;min-height:0;padding:0;border-radius:50%;font-size:16px;line-height:1;flex:none}
+  .cw-compose .cw-send.cw-round:disabled{background:var(--panel);border-color:var(--border);color:var(--muted);opacity:1}
+  .cw-compose .cw-send.cw-stopping{background:var(--text);border-color:var(--text);color:var(--bg)}
   .cw-ed{display:block;box-sizing:border-box;width:100%;min-height:6.5em;max-height:40vh;overflow-x:hidden;overflow-y:auto;
     padding:8px;background:var(--panel2);border:1px solid var(--border);border-radius:6px;color:var(--text);
     font:inherit;font-size:var(--fs-sm);white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;cursor:text}
@@ -1152,6 +1193,7 @@
     border-radius:10px;overflow-x:auto;max-width:100%;font-family:var(--font-sans);
     font-size:var(--fs-md);line-height:1.4;color:var(--text)}
   .cw-vis svg{display:block;width:100%;height:auto;max-width:760px;margin:0 auto}
+  .cw-vis:not(.cw-ov-wrap):has(svg){cursor:zoom-in}
   .cw-vis img{max-width:100%}
   .cw-vis-group{margin:8px 0 14px}
 
@@ -1234,6 +1276,7 @@
   .cw-ctx-bar i{display:block}
   .cw-ctx-bar .ok{background:var(--green)}.cw-ctx-bar .pt{background:var(--yellow)}.cw-ctx-bar .no{background:var(--red)}
   .cw-ctx-stale,.cw-ctx-empty,.cw-ctx-msg{color:var(--muted);font-size:var(--fs-xs)}
+  .cw-ctx-open{border:0;background:none;padding:0;color:var(--accent);font:inherit;cursor:pointer}
   .cw-ctx-stale{margin:6px 2px 0}
   .cw-ctx-link{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
   .cw-ctx-input{flex:1 1 240px;min-width:0;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--text);font:inherit;font-family:var(--mono);font-size:11.5px}
@@ -2010,8 +2053,10 @@ if(window.CW_LIVE){
   // The svg actually on screen inside `box`: for a wrapper that's its one .mermaid child, for
   // a graph level box (box IS the .mermaid element, one per detail level, siblings hidden by
   // the level script) it's the box's own svg.
+  // Model-drawn SVG pictures (page edits from threads, per-group visuals): click to open the zoom dialog.
+  const PIC_SEL='.cw-vis:not(.cw-ov-wrap)';
   function visibleSvg(box){
-    return box.matches('.mermaid')?box.querySelector('svg')
+    return box.matches('.mermaid,'+PIC_SEL)?box.querySelector('svg')
       :box.querySelector('.mermaid:not([hidden]) svg')||box.querySelector('svg.cw-ov');
   }
   function openZoom(box){
@@ -2023,6 +2068,7 @@ if(window.CW_LIVE){
     const clone=svg.cloneNode(true);
     clone.__navSource=svg; // focusNavNode/clearNavFocus mirror onto this, so fullscreen focus changes survive the dialog closing
     clone.style.minWidth=''; // the overview's inline min-width is for the page, not the dialog
+    zbody.classList.toggle('cw-vis',box.matches(PIC_SEL)); // the fragment's colours are --foreground etc., defined on .cw-vis
     zbody.replaceChildren(clone);
     const api=panZoom(clone,'modal');
     if(api&&clone.classList.contains('cw-ov')) api.reset(); // whole graph first, pinch in from there
@@ -2045,12 +2091,12 @@ if(window.CW_LIVE){
         if(e.key==='Enter'||e.key===' '){ e.preventDefault(); openZoom(box); }
       });
     }
-    if(pzWired.has(svg)) return;
+    if(pzWired.has(svg)||box.matches(PIC_SEL)) return; // a picture keeps its authored size inline; only the dialog pans
     panZoom(svg,'inline');
   }
   const DIAGRAM_SEL='.vd-symbols .mermaid';
   function wireAll(){
-    document.querySelectorAll(DIAGRAM_SEL).forEach(wire);
+    document.querySelectorAll(DIAGRAM_SEL+','+PIC_SEL).forEach(wire);
   }
   // mermaid renders asynchronously after startOnLoad, so watch for the svg to
   // appear instead of assuming it exists when this script runs. `hidden` is watched too: a
@@ -4300,7 +4346,7 @@ if(window.CW_LIVE){
       const send=mkBtn(tx.btn,'cw-send fb-primary');
       const row=mk('div','fb-actions'); row.append(send);
       const cancelBtn=mkBtn('Cancel','cw-cancel fb-ghost'); row.append(cancelBtn);
-      const hint=mk('span','cw-compose-hint','Esc closes, Ctrl+Enter saves');
+      const hint=mk('span','cw-compose-hint','Enter saves, Shift+Enter new line, Esc closes');
       const note=mk('p','cw-compose-note'); note.append(mk('span',null,tx.note),hint);
       const status=mk('p','cw-compose-status'); status.setAttribute('role','status');
       const prompt=mk('div','fb-actions cw-discard'); prompt.hidden=true;
@@ -4333,7 +4379,7 @@ if(window.CW_LIVE){
       dropBtn.addEventListener('click',()=>onCancel());
       ta.addEventListener('input',sync);
       ta.addEventListener('keydown',e=>{
-        if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){ e.preventDefault(); act(); }
+        if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing&&e.keyCode!==229){ e.preventDefault(); act(); }
       });
       sync();
       return {box,ta,send,isEmpty,prompting,keepEditing,cancel,nudge,sync};
@@ -4391,6 +4437,7 @@ if(window.CW_LIVE){
     const streamElsOf=qid=>[...document.querySelectorAll('.cw-streaming')].filter(e=>e.dataset.qid===qid);
     function paintStream(e,text){
       e.replaceChildren(mdEl(text));
+      if(!text) return;
       const c=mk('span','cw-caret'); c.setAttribute('aria-hidden','true');
       (e.lastElementChild&&/^(P|H4|H5)$/.test(e.lastElementChild.tagName)?e.lastElementChild:e).append(c);
     }
@@ -4438,6 +4485,17 @@ if(window.CW_LIVE){
     }
 
     const turnRefs=r=>(r.anchors||[r.anchor]).filter(a=>a&&a.kind!=='free');
+    // Re-asks r's question in thread t on another Claude install (the missing-skill hint).
+    function retryOn(t,r,alt){
+      t.msg.textContent='';
+      pickAgent({config_dir:alt,model:r.model||'sonnet'},false)
+        .then(()=>postJson('/comment',{anchors:turnRefs(r),text:r.comment||r.question||'',thread_id:t.id}))
+        .then(res=>{
+          if(res&&!res.ok){ t.msg.textContent=res.body.error||'Request failed'; return; }
+          if(agentChip&&agentData){ agentData.selected={config_dir:alt,model:r.model||'sonnet'}; agentChip.update(agentData); }
+        })
+        .catch(e=>{ t.msg.textContent=e.message||'Request failed -- check the daemon is still running.'; });
+    }
     function retryBtn(t,r){
       const b=mkBtn('Retry','cw-retry fb-ghost');
       b.addEventListener('click',()=>{
@@ -4560,27 +4618,37 @@ if(window.CW_LIVE){
       const t=threads.get(o.thread_id);
       if(o.state!=='applied'||!t) return;
       const dest=pageEditTarget(o);
-      const n=mk('div','cw-pageedit'); n.dataset.oid=o.oid;
-      const label=mk('p','cw-pageedit-label','added by agent from your comment');
-      if(dest.outdated) label.append(mk('span','cw-pageedit-chip','outdated'));
+      const kept=!!p.kept;
+      const n=mk('div','cw-pageedit'+(kept?' cw-kept':'')); n.dataset.oid=o.oid;
+      const r=(t.turns||[]).find(x=>x.qid===o.qid)||{};
+      const who=r.setup?r.setup+(r.model?' \u00b7 '+r.model[0].toUpperCase()+r.model.slice(1):''):'the agent';
+      const bar=mk('div','cw-pageedit-bar');
+      if(typeof window!=='undefined'&&window.CWAgent) bar.append(window.CWAgent.spark());
+      bar.append(kept?mk('span',null,'added by '+who+', kept by you'):mk('span',null,'Suggested by '),
+        ...(kept?[]:[mk('b',null,who),mk('span',null,'\u00b7 from your comment')]));
+      if(dest.outdated) bar.append(mk('span','cw-pageedit-chip','outdated'));
       const msg=mk('span','cw-pageedit-msg'); msg.setAttribute('role','status');
-      const undo=mkBtn('Undo','fb-ghost');
-      undo.addEventListener('click',()=>pageEditAct(o.oid,'revert',undo,msg));
-      const open=mkBtn('Open thread','fb-ghost');
+      const open=mkBtn('Thread','fb-ghost');
       open.addEventListener('click',()=>openThreadOf(t));
-      const acts=mk('div','cw-pageedit-actions'); acts.append(undo,open,msg);
-      n.append(label,pageEditContent(p.block));
+      const undo=mkBtn(kept?'Undo':'Discard','fb-ghost');
+      undo.addEventListener('click',()=>pageEditAct(o.oid,'revert',undo,msg));
+      bar.append(mk('span','cw-grow'),msg,open,undo);
+      if(!kept){
+        const keep=mkBtn('\u2713 Keep in page','fb-primary');
+        keep.addEventListener('click',()=>pageEditAct(o.oid,'keep',keep,msg));
+        bar.append(keep);
+      }
+      if(kept) n.append(pageEditContent(p.block),bar); else n.append(bar,pageEditContent(p.block));
       let orig=null;
       if(p.op==='replace'&&dest.el&&!dest.outdated){
         orig=dest.el;
         const det=document.createElement('details');
         det.append(mk('summary',null,'original'),mk('p','cw-pageedit-orig',textOf(orig.querySelector('.cw-pageedit-body')||orig)));
-        n.append(det);
+        if(!kept) n.append(det);
         if(!hiddenBy.has(orig)) hiddenBy.set(orig,new Set());
         hiddenBy.get(orig).add(o.oid);
         orig.classList.add('cw-pageedit-hidden');
       }
-      n.append(acts);
       if(dest.el) dest.el.insertAdjacentElement('afterend',n); else planEl.prepend(n);
       pageEdits.set(o.oid,{node:n,orig,sig,o,outdated:dest.outdated,destEl:dest.el});
       n.querySelectorAll('pre.mermaid').forEach(pre=>renderMermaidEdit(pre,pre.textContent));
@@ -4600,13 +4668,18 @@ if(window.CW_LIVE){
       const p=o.payload||{};
       const what=pageEditWhat(p);
       const d=mk('div','cw-outcome'); d.dataset.oid=o.oid; d.dataset.state=o.state;
-      d.append(mk('span','cw-outcome-text','Page edit: '+what+' ('+o.state+')'));
+      d.append(mk('span','cw-outcome-text','Page edit: '+what+' ('+(p.kept&&o.state==='applied'?'kept':o.state)+')'));
       const acts=mk('div','cw-outcome-actions');
       const verb=o.state==='applied'?'revert':'reapply';
       if(o.state==='applied'||o.state==='reverted'){
         const b1=mkBtn(o.state==='applied'?'Undo':'Redo','fb-ghost');
         b1.addEventListener('click',()=>pageEditAct(o.oid,verb,b1,t.msg));
         acts.append(b1);
+      }
+      if(o.state==='applied'&&!p.kept){
+        const keep=mkBtn('\u2713 Keep in page','fb-primary');
+        keep.addEventListener('click',()=>pageEditAct(o.oid,'keep',keep,t.msg));
+        acts.prepend(keep);
       }
       if(o.state==='applied'){
         const show=mkBtn('Show it','fb-ghost');
@@ -5138,8 +5211,12 @@ if(window.CW_LIVE){
         if(p.text!=null){ if(p.text) q.append(document.createTextNode(p.text)); }
         else q.append(chipNode(refFromParsed(p),true));
       }
-      if(r.mode==='full') q.append(mk('span','cw-mode-badge','Full'));
+      // The access pill shows the current mode; a turn only says its own when it differs.
+      const fullNow=!!(window.CW_LIVE.agent&&window.CW_LIVE.agent.full);
+      if((r.mode==='full')!==fullNow) q.append(mk('span','cw-mode-badge',r.mode==='full'?'Full':'Review only'));
       d.append(q);
+      const by=window.CWAgent&&r.status!=='pending'?window.CWAgent.turnBadge(r,isLast?alt=>retryOn(t,r,alt):null):null;
+      if(by) d.append(by);
       if(r.status==='pending'){
         const st=streams.get(r.qid)||{};
         const live=mk('div','cw-turn-a cw-md cw-streaming');
@@ -5149,7 +5226,7 @@ if(window.CW_LIVE){
         const dots=mk('span','cw-dots'); dots.setAttribute('aria-hidden','true');
         for(let i=0;i<3;i++) dots.appendChild(document.createElement('i'));
         const prog=mk('span','cw-progress',progressText(st.progress)); prog.dataset.qid=r.qid;
-        p.append(dots,mk('span',null,'(working)'),stopBtn(t,r),prog);
+        p.append(dots,mk('span',null,'Working'),prog);
         d.append(live,p);
         if(r.queued_behind) d.append(mk('p','cw-turn-a cw-queued','Queued behind '+r.queued_behind));
       } else if(r.status==='error'){
@@ -5166,6 +5243,23 @@ if(window.CW_LIVE){
         const ul=mk('ul',null);
         for(const x of r.denied) ul.append(mk('li',null,String((x&&x.tool)||'')+(x&&x.detail?' '+x.detail:'')));
         dn.append(ul); d.append(dn);
+        // MCP tools (a Jira read, say) can be allowed for this Claude install; the turn then runs again.
+        const mcpTools=[...new Set(r.denied.map(x=>x&&x.tool).filter(n=>/^mcp__[A-Za-z0-9_.-]+$/.test(n||'')))];
+        if(mcpTools.length&&isLast){
+          const allow=mkBtn(mcpTools.length===1?'Allow and retry':'Allow these and retry','fb-ghost cw-allow');
+          allow.title='Every later Full turn on this Claude install may call '+mcpTools.join(', ')+' without asking.';
+          allow.addEventListener('click',()=>{
+            allow.disabled=true; t.msg.textContent='';
+            postJson('/approve',{tools:mcpTools})
+              .then(({ok,body})=>{
+                if(!ok||body.error) throw new Error(body.error||'Request failed');
+                return postJson('/comment',{anchors:turnRefs(r),text:r.comment||r.question||'',thread_id:t.id});
+              })
+              .then(({ok,body})=>{ if(!ok) throw new Error(body.error||'Request failed'); })
+              .catch(e=>{ allow.disabled=false; t.msg.textContent=e.message||'Request failed -- check the daemon is still running.'; });
+          });
+          dn.append(allow);
+        }
       }
       if((r.status==='error'||r.status==='cancelled')&&isLast) d.append(retryBtn(t,r));
       for(const o of (outcomesByQid.get(r.qid)||new Map()).values()) d.append(outcomeEl(t,o));
@@ -5570,7 +5664,7 @@ if(window.CW_LIVE){
         if(e.ctrlKey&&!e.metaKey&&k==='y'){ e.preventDefault(); edUndo(ed,true); return; }
         if(e.key==='Enter'){
           e.preventDefault();
-          if(mod){ if(ed.onSend) ed.onSend(); } else edInsertText(ed,'\n');
+          if(e.shiftKey&&!mod) edInsertText(ed,'\n'); else if(ed.onSend) ed.onSend();
           return;
         }
         if(e.key==='Backspace'&&edDelAdjacent(ed,-1)) e.preventDefault();
@@ -5623,16 +5717,30 @@ if(window.CW_LIVE){
     function threadComposer(view){
       const ed=view.editor;
       const box=mk('div','cw-compose'); box.dataset.mode='agent';
-      const send=mkBtn('Send','cw-send fb-primary');
-      const row=mk('div','fb-actions'); row.append(send);
-      const note=mk('p','cw-compose-note'); note.append(mk('span','cw-compose-hint','Ctrl+Enter sends'));
+      const send=mkBtn('\u2191','cw-send cw-round fb-primary');
+      const note=mk('p','cw-compose-note'); note.append(mk('span','cw-compose-hint','Enter sends, Shift+Enter new line'));
+      const row=mk('div','cw-compose-row'); row.append(note,send);
+      const inner=mk('div','cw-compose-box'); inner.append(ed.el,row);
       const status=mk('p','cw-compose-status'); status.setAttribute('role','status');
-      box.append(ed.el,row,note,status);
-      const c={box,send,status,busy:false,sync:()=>{ send.disabled=c.busy||ed.isEmpty(); }};
+      box.append(inner,status);
+      const c={box,send,status,busy:false,stopQid:null,sync:()=>{
+        const stop=!!c.stopQid&&ed.isEmpty();
+        send.classList.toggle('cw-stopping',stop);
+        send.textContent=stop?'\u25a0':'\u2191';
+        send.setAttribute('aria-label',stop?'Stop the agent':'Send');
+        send.disabled=stop?false:(c.busy||ed.isEmpty());
+      }};
+      c.setStop=qid=>{ c.stopQid=qid; c.sync(); };
       ed.onChange=c.sync;
       ed.onSend=()=>sendView(view);
       ed.say=m=>{ if(m||!c.busy) status.textContent=m; };
-      send.addEventListener('click',()=>sendView(view));
+      send.addEventListener('click',()=>{
+        if(!(c.stopQid&&ed.isEmpty())) return sendView(view);
+        send.disabled=true;
+        postJson('/comment/'+encodeURIComponent(c.stopQid)+'/cancel',{})
+          .then(({ok,status:st,body})=>{ if(!ok&&st!==404){ send.disabled=false; status.textContent=body.error||'Request failed'; } })
+          .catch(()=>{ send.disabled=false; status.textContent='Request failed -- check the daemon is still running.'; });
+      });
       c.sync();
       return c;
     }
@@ -5671,7 +5779,7 @@ if(window.CW_LIVE){
       t.badge=mk('span','cw-th-badge','Resolved');
       t.triageTag=mk('span','cw-th-triage','triage'); t.triageTag.hidden=true;
       t.resolveBtn=mkBtn('Resolve','cw-th-resolve fb-ghost');
-      head.append(t.badge,t.triageTag,t.resolveBtn);
+      head.append(t.badge,t.triageTag,t.resolveBtn); t.head=head; t.resolveBtn.hidden=true;
       t.msg=mk('p','cw-compose-status'); t.msg.setAttribute('role','status');
       t.body=mk('div','cw-thread-body');
       t.turnsEl=mk('div','cw-turns');
@@ -5705,6 +5813,9 @@ if(window.CW_LIVE){
       t.resolveBtn.textContent=t.resolved?'Reopen':'Resolve';
       t.badge.hidden=!t.resolved;
       t.triageTag.hidden=first.source!=='triage';
+      t.head.hidden=t.badge.hidden&&t.triageTag.hidden;
+      const pend=t.turns.find(r=>r.status==='pending');
+      t.composer.setStop(pend?pend.qid:null);
       t.turnsEl.replaceChildren(...t.turns.map((r,i)=>turnEl(r,t,i===t.turns.length-1)));
     }
 
@@ -5724,8 +5835,7 @@ if(window.CW_LIVE){
       dotOf=next;
       for(const [el,tid] of next){
         el.classList.add('cw-ref-dot'); el.dataset.cwSent='1';
-        if(!el.classList.contains('dline')) continue;
-        let b=el.querySelector('.cw-ref-dot-btn');
+        let b=el.querySelector(':scope>.cw-ref-dot-btn');
         if(!b){
           b=document.createElement('button'); b.type='button'; b.className='cw-ref-dot-btn'; b.tabIndex=-1;
           b.addEventListener('mousedown',e=>e.preventDefault());
@@ -5862,7 +5972,38 @@ if(window.CW_LIVE){
     pBack.setAttribute('aria-label','Back to all threads'); pBack.hidden=true;
     const pTitle=mk('span'); pTitle.id='cw-panel-title';
     const pClose=mkBtn('✕','cw-panel-icon'); pClose.id='cw-panel-close'; pClose.setAttribute('aria-label','Close');
-    pHead.append(pBack,pTitle,pClose);
+    const pMore=mk('div','cw-more'); pMore.hidden=true;
+    const pMoreBtn=mkBtn('\u22ef','cw-panel-icon cw-ghost'); pMoreBtn.setAttribute('aria-label','More actions');
+    pMoreBtn.setAttribute('aria-haspopup','menu'); pMoreBtn.setAttribute('aria-expanded','false');
+    const pMorePop=mk('div','cw-more-pop'); pMorePop.setAttribute('role','menu'); pMorePop.hidden=true;
+    pMore.append(pMoreBtn,pMorePop);
+    pBack.classList.add('cw-ghost'); pClose.classList.add('cw-ghost');
+    pHead.append(pBack,pTitle,pMore,pClose);
+    let trustedBy=null;
+    const closeMore=()=>{ pMorePop.hidden=true; pMoreBtn.setAttribute('aria-expanded','false'); };
+    function moreItem(label,sub,cls,run){
+      const b=mkBtn(null,cls||null); b.setAttribute('role','menuitem');
+      b.append(document.createTextNode(label)); if(sub) b.append(mk('small',null,sub));
+      b.addEventListener('click',()=>{ closeMore(); run(); });
+      return b;
+    }
+    pMoreBtn.addEventListener('click',()=>{
+      if(!pMorePop.hidden){ closeMore(); return; }
+      const t=panelView&&threads.get(panelView);
+      const items=[];
+      if(t) items.push(t.resolved?moreItem('Reopen thread',null,null,()=>t.resolveBtn.click())
+        :moreItem('\u2713 Resolve thread','Hide it from the open list',null,()=>t.resolveBtn.click()));
+      if(trustedBy&&trustedBy.scope!=='own_pr') items.push(moreItem('Stop trusting '+trustedBy.value,'Next turns run review-only','cw-danger',()=>{
+        postJson('/trust',{scope:trustedBy.scope,action:'remove'})
+          .then(({ok,body})=>{ if(!ok||body.error) (t?t.msg:pStatus).textContent=(body.error||'Request failed'); else paintAccess(body.agent); })
+          .catch(()=>{ (t?t.msg:pStatus).textContent='Request failed -- check the daemon is still running.'; });
+      }));
+      if(!items.length) return;
+      pMorePop.replaceChildren(...items); pMorePop.hidden=false; pMoreBtn.setAttribute('aria-expanded','true');
+      items[0].focus();
+    });
+    document.addEventListener('mousedown',e=>{ if(!pMore.contains(e.target)) closeMore(); },true);
+    pMorePop.addEventListener('keydown',e=>{ if(e.key==='Escape'){ e.stopPropagation(); closeMore(); pMoreBtn.focus(); } });
 
     const pList=mk('div'); pList.id='cw-panel-list';
     const pFilters=mk('div'); pFilters.id='cw-panel-filters'; pFilters.setAttribute('role','group');
@@ -5895,9 +6036,12 @@ if(window.CW_LIVE){
     pFoot.append(pNew,thSubmit,triageBtn,pStatus);
     pList.append(pFilters,pRows,pFoot);
 
-    const pAccess=mk('div','cw-access'); pAccess.setAttribute('role','status');
+    const pAccess=mk('div','cw-access');
+    const agentSlot=mk('span'), accessSlot=mk('span','cw-access-slot'); accessSlot.setAttribute('role','status');
+    pAccess.append(agentSlot,accessSlot);
     function paintAccess(a){
       const kids=[];
+      trustedBy=a&&a.full&&a.trusted&&a.trusted.by?{scope:a.trusted.by,value:a.trusted.value}:null;
       const off=a&&a.full_off, by=a&&a.full&&a.trusted&&a.trusted.by;
       if(off){
         kids.push(mk('span',null,'Review only: '+off.reason+'. '+off.remedy));
@@ -5907,22 +6051,22 @@ if(window.CW_LIVE){
           if(off.org) kids.push(trustBtn('Trust all of '+off.org,'org','add',
             'Trust all of '+off.org+'? Full lets the agent run commands and edit the code of every repo owned by '+off.org+' on this machine, in a sandboxed worktree with no push. It also applies to PRs from forks into those repos.'));
         }
-      } else if(by==='own_pr'){
-        kids.push(mk('span',null,'Full access: your PR'));
-      } else if(by==='repo'||by==='org'){
-        kids.push(mk('span',null,'Full access: trusted ('+a.trusted.value+')'));
-        kids.push(trustBtn('Stop trusting',by,'remove',null));
+      } else if(by){
+        const pill=mk('span','cw-access-pill','Full access');
+        pill.title=by==='own_pr'?'Your PR: the agent may run commands and edit code in a sandboxed worktree'
+          :'Trusted ('+a.trusted.value+'): the agent may run commands and edit code in a sandboxed worktree. Stop trusting is in the \u22ef menu.';
+        kids.push(pill);
       }
-      pAccess.replaceChildren(...kids);
-      pAccess.hidden=!kids.length;
+      accessSlot.replaceChildren(...kids);
+      pAccess.hidden=!kids.length&&!agentSlot.childElementCount;
     }
     function trustBtn(label,scope,action,warn){
       const b=mkBtn(label,'fb-ghost cw-access-btn');
       b.addEventListener('click',()=>{
         if(warn&&!confirm(warn)) return;
-        const all=[...pAccess.querySelectorAll('button')];
+        const all=[...accessSlot.querySelectorAll('button')];
         all.forEach(x=>{ x.disabled=true; });
-        const fail=m=>{ all.forEach(x=>{ x.disabled=false; }); pAccess.append(mk('span','cw-access-err',m)); };
+        const fail=m=>{ all.forEach(x=>{ x.disabled=false; }); accessSlot.append(mk('span','cw-access-err',m)); };
         postJson('/trust',{scope,action})
           .then(({ok,body})=>{
             if(!ok||body.error) fail((body.error||'Request failed')+(body.remedy?' ('+body.remedy+')':''));
@@ -5934,6 +6078,23 @@ if(window.CW_LIVE){
     }
     paintAccess(window.CW_LIVE.agent);
     window.__cwOnAgent=paintAccess;
+    // Which Claude account and model answer here. cw-agent is spliced after this script, so mount on DOMContentLoaded.
+    let agentChip=null, agentData=null;
+    function pickAgent(agent,remember){
+      return postJson('/agent',{...agent,remember}).then(({ok,body})=>{
+        if(!ok||body.error) throw new Error((body.error||'Request failed')+(body.remedy?' ('+body.remedy+')':''));
+      });
+    }
+    function paintAgent(a){
+      const p=a&&a.picker;
+      if(!p||!window.CWAgent) return;
+      agentData=p;
+      if(agentChip) agentChip.update(p);
+      else { agentChip=window.CWAgent.chip(p,{small:true,remember:true,onPick:pickAgent}); agentSlot.append(agentChip.el); pAccess.hidden=false; }
+    }
+    if(window.CWAgent) paintAgent(window.CW_LIVE.agent);
+    else document.addEventListener('DOMContentLoaded',()=>{ paintAgent(window.CW_LIVE.agent); for(const t of threads.values()) renderThread(t); });
+    window.__cwOnAgent=a=>{ paintAccess(a); paintAgent(a); };
     window.__cwOpenThread=tid=>openPanel({thread:tid});
 
     const pThread=mk('div'); pThread.id='cw-panel-thread'; pThread.hidden=true;
@@ -6007,7 +6168,15 @@ if(window.CW_LIVE){
     function paintPanelHead(){
       const t=panelView&&threads.get(panelView);
       const v=viewOf(panelView);
-      pTitle.textContent=panelView===NEW?'New thread':t?threadTitle(t)||'Thread':v?'Ask about a review thread':panelLabel;
+      pMore.hidden=!t; closeMore();
+      if(t){
+        const f=t.turns[0]||{}, parts=parseRefText(f.comment||f.question||'');
+        const main=parts.filter(p=>p.text!=null).map(p=>p.text).join(' ').replace(/\s+/g,' ').trim();
+        const sub=parts.filter(p=>p.text==null).map(p=>refFromParsed(p).label).join(', ');
+        pTitle.replaceChildren(mk('span','cw-pt-main',main||sub||'Thread'));
+        if(sub&&main) pTitle.append(mk('span','cw-pt-sub',sub));
+        pTitle.title=main;
+      } else { pTitle.textContent=panelView===NEW?'New thread':v?'Ask about a review thread':panelLabel; pTitle.title=''; }
       grabText.textContent=panelLabel;
     }
     function showView(tid){
@@ -6566,7 +6735,8 @@ function wireCtxLink(form){
       .then(({ok,b})=>{
         if(!ok){ say((b.error||'Request failed')+(b.remedy?' ('+b.remedy+')':''),true); return; }
         handed=true; input.value='';
-        say('Handed to your Claude Code session. Paste the instruction from the thread there.');
+        say(b.running?'Fetching the ticket with your agent. The Context section fills in when it is done.'
+          :'Handed to your Claude Code session. Paste the instruction from the thread there.');
         if(window.__cwOpenThread&&b.thread_id) window.__cwOpenThread(b.thread_id);
       })
       .catch(()=>say('Could not reach the walkthrough server.',true))
@@ -6577,8 +6747,15 @@ document.querySelectorAll('form.cw-ctx-link').forEach(wireCtxLink);
 function armCtxHint(){
   document.querySelectorAll('#cw-context[data-ticket-hint]:not([data-armed])').forEach(sec=>{
     sec.dataset.armed='1';
-    const at=+sec.dataset.hintAt;
-    const left=at?Math.max(0,120000-(Date.now()-at*1000)):120000;
+    const at=+sec.dataset.hintAt, run=sec.dataset.hintRun;
+    // An agent run fetching the ticket gets ten minutes before the page offers the manual form.
+    const wait=run?600000:120000, left=at?Math.max(0,wait-(Date.now()-at*1000)):wait;
+    const msg=sec.querySelector('.cw-ctx-empty');
+    if(run&&msg&&window.__cwOpenThread){
+      const open=document.createElement('button'); open.type='button'; open.className='cw-ctx-open'; open.textContent='Watch it';
+      open.addEventListener('click',()=>window.__cwOpenThread(run));
+      msg.append(' · ',open);
+    }
     sec.__cwTimer=setTimeout(()=>{
       const tpl=sec.querySelector('template'), card=sec.querySelector('.cw-ctx-card');
       if(!sec.isConnected||!tpl||!card) return;

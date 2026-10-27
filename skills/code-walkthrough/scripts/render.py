@@ -343,8 +343,10 @@ def clean_ticket_hint(raw):
         return None
     found = raw.get("found_in")
     at = raw.get("at")
+    run = raw.get("run")
     return {"key": key.strip()[:80], "found_in": found if isinstance(found, str) and found in _CTX_FOUND_IN else None,
-            "at": at if isinstance(at, (int, float)) and not isinstance(at, bool) and math.isfinite(at) else None}
+            "at": at if isinstance(at, (int, float)) and not isinstance(at, bool) and math.isfinite(at) else None,
+            "run": run if isinstance(run, str) and re.fullmatch(r"q-[0-9a-f]{8}", run) else None}
 
 
 def context_html(ctx, files, current_head="", building=False, hint=None):
@@ -357,11 +359,12 @@ def context_html(ctx, files, current_head="", building=False, hint=None):
         found = _CTX_FOUND_IN.get(hint.get("found_in"))
         return ('<section class="cw-context" id="cw-context" aria-labelledby="cw-context-h"'
                 f' data-ticket-hint="{escape(hint["key"])}"' + (f' data-hint-at="{int(hint["at"])}"' if hint.get("at") else "")
+                + (f' data-hint-run="{hint["run"]}"' if hint.get("run") else "")
                 + '><h2 id="cw-context-h">Context</h2>'
                 '<div class="cw-ctx-card"><div class="cw-ctx-head"><span class="cw-ctx-glyph" aria-hidden="true">'
                 f'&#9670;</span><span class="cw-ctx-key">{escape(hint["key"])}</span>'
                 + (f'<span class="cw-ctx-found">found in {found}</span>' if found else "")
-                + '</div><p class="cw-ctx-empty">Comparing with the diff</p>'
+                + '</div><p class="cw-ctx-empty">' + ("Fetching the ticket with your agent" if hint.get("run") else "Comparing with the diff") + '</p>'
                 '<span class="cw-skel-line" aria-busy="true"></span></div>'
                 f'<template>{_ctx_form_html()}</template></section>')
     if not ctx and building:

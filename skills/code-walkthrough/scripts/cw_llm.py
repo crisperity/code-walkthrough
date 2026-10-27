@@ -227,8 +227,11 @@ def chat(profile, messages, tools=None, *, timeout=300, stream=False, on_chunk=N
     raise AssertionError("unreachable")  # pragma: no cover
 
 
-def claude_env():
-    return {k: v for k, v in os.environ.items() if k not in _CLAUDE_ENV_DROP}
+def claude_env(profile=None):
+    env = {k: v for k, v in os.environ.items() if k not in _CLAUDE_ENV_DROP}
+    if profile and profile.get("config_dir"):
+        env["CLAUDE_CONFIG_DIR"] = profile["config_dir"]
+    return env
 
 
 _NO_PUSH_PROTOCOLS = ("https", "http", "ssh", "git", "file", "ext")
@@ -292,7 +295,7 @@ def claude_call(profile, system, prompt, *, cwd, tools, schema=None, timeout=300
     try:
         try:
             proc = subprocess.Popen(
-                argv, cwd=cwd, env=claude_env(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                argv, cwd=cwd, env=claude_env(profile), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, text=True, start_new_session=True,
             )
         except FileNotFoundError as e:
@@ -354,7 +357,10 @@ def thread_argv(profile, system, *, mcp_config, add_dir, session_id=None, resume
 FULL_DISALLOWED = ",".join((
     "Bash(git push:*)", "Bash(rtk git push:*)", "Bash(git -c:*)", "Bash(git --no-pager push:*)",
     "Bash(env:*)", "Bash(*GIT_CONFIG*)", "Bash(gh pr create:*)", "Bash(gh pr review:*)",
-    "Bash(gh pr merge:*)", "Bash(gh pr comment:*)", "Bash(gh issue:*)", "Bash(gh api:*)",
+    "Bash(gh pr merge:*)", "Bash(gh pr comment:*)", "Bash(gh api:*)",
+    # gh issue view stays allowed so a ticket on GitHub can be read; everything that changes an issue is not.
+    *(f"Bash(gh issue {v}:*)" for v in ("create", "edit", "comment", "close", "reopen", "delete", "transfer",
+                                         "lock", "unlock", "pin", "unpin", "develop")),
     "mcp__code-walkthrough", "mcp__plugin_code-walkthrough_code-walkthrough",
     "WebFetch", "WebSearch",
 ))
@@ -376,13 +382,150 @@ def _secret_files():
     return sorted({os.path.realpath(p) for p in paths if os.path.exists(p)})
 
 
-def project_dir(home, cwd):
+AGENT_MODELS = ("haiku", "sonnet", "opus")
+
+
+def _is_setup(p):
+    p = Path(p)
+    return p.is_dir() and ((p / "settings.json").exists() or (p / ".credentials.json").exists())
+
+
+def _setups_config(config):
+    raw = (config if config is not None else cw_store.load_config()).get("setups")
+    return raw if isinstance(raw, dict) else {}
+
+
+def claude_profiles(home=None, config=None, include_hidden=False):
+    """Claude Code installs on this machine: ~/.claude and ~/.claude-*, the daemon's own
+    CLAUDE_CONFIG_DIR and folders the user added, each holding settings or credentials.
+    [{dir, label, named, hidden}]; label is the user's name for it, else the folder's."""
+    home = Path(home or Path.home())
+    setups = _setups_config(config)
+    found = {home / ".claude"} | set(home.glob(".claude-*"))
+    if os.environ.get("CLAUDE_CONFIG_DIR"):
+        found.add(Path(os.environ["CLAUDE_CONFIG_DIR"]))
+    found |= {Path(d) for d, v in setups.items() if isinstance(v, dict) and v.get("added")}
+    out = []
+    for p in sorted({q.resolve() for q in found if _is_setup(q)}, key=lambda p: (p.name != ".claude", str(p))):
+        conf = setups.get(str(p)) if isinstance(setups.get(str(p)), dict) else {}
+        hidden = bool(conf.get("hidden"))
+        if hidden and not include_hidden:
+            continue
+        name = conf.get("name") if isinstance(conf.get("name"), str) and conf.get("name").strip() else None
+        out.append({"dir": str(p), "label": name or p.name,
+                    "named": bool(name), "hidden": hidden})
+    return out
+
+
+def setup_label(config_dir, config=None):
+    return next((p["label"] for p in claude_profiles(config=config, include_hidden=True) if p["dir"] == config_dir), None)
+
+
+_SETUP_INFO = {}
+_SETUP_INFO_TTL = 600
+
+
+def setup_skills(config_dir):
+    """Skill and slash-command names this install offers: its own skills/ and commands/, and the
+    skills of every plugin its settings enable. Names only, without the plugin prefix."""
+    root = Path(config_dir)
+    names = {p.parent.name for p in root.glob("skills/*/SKILL.md")}
+    names |= {p.stem for p in root.glob("commands/*.md")}
+    settings = cw_store.read_json(root / "settings.json", default=None) or {}
+    installed = (cw_store.read_json(root / "plugins" / "installed_plugins.json", default=None) or {}).get("plugins") or {}
+    for key, on in (settings.get("enabledPlugins") or {}).items():
+        for inst in installed.get(key) or [] if on else []:
+            base = Path(inst.get("installPath") or "")
+            names |= {p.parent.name for p in base.glob("skills/*/SKILL.md")}
+            names |= {p.stem for p in base.glob("commands/*.md")}
+    return sorted(names)
+
+
+def setup_info(config_dir, run=subprocess.run, clock=time.monotonic):
+    """{email, org, plan, logged_in, skills} for one install, from `claude auth status`.
+    ponytail: cached for 10 minutes per dir; a fresh login shows after that or a daemon restart."""
+    hit = _SETUP_INFO.get(config_dir)
+    if hit and clock() - hit[0] < _SETUP_INFO_TTL:
+        return hit[1]
+    info = {"email": None, "org": None, "plan": None, "logged_in": False}
+    try:
+        out = run(["claude", "auth", "status", "--json"], capture_output=True, text=True, timeout=15,
+                  env={**claude_env(), "CLAUDE_CONFIG_DIR": config_dir})
+        data = json.loads(out.stdout or "{}")
+        info = {"email": data.get("email"), "org": data.get("orgName"), "plan": data.get("subscriptionType"),
+                "logged_in": bool(data.get("loggedIn"))}
+    except (OSError, subprocess.SubprocessError, ValueError):
+        pass
+    info["skills"] = setup_skills(config_dir)
+    _SETUP_INFO[config_dir] = (clock(), info)
+    return info
+
+
+def agents_payload(config, selected=None):
+    """What a picker shows: every install with who it is signed in as and its skills, the models,
+    the current choice and whether the first-run naming step is due."""
+    everything = claude_profiles(config=config, include_hidden=True)
+    setups = []
+    for p in everything:
+        info = setup_info(p["dir"])
+        setups.append({"config_dir": p["dir"], "label": p["label"], "named": p["named"], "hidden": p["hidden"],
+                       "folder": p["dir"].replace(str(Path.home()), "~", 1), "email": info["email"],
+                       "org": info["org"], "plan": info["plan"], "logged_in": info["logged_in"],
+                       "skills_count": len(info["skills"])})
+    return {"setups": setups, "models": list(AGENT_MODELS), "selected": selected,
+            "setup_due": len(everything) > 1 and not config.get("setups_seen")}
+
+
+APPROVABLE_TOOL = re.compile(r"mcp__[A-Za-z0-9_.-]+")
+
+
+def effective_config_dir(config_dir=None):
+    return str(Path(config_dir) if config_dir else claude_dir(Path.home()).resolve())
+
+
+def approved_tools(config, config_dir=None):
+    """MCP tools the user allowed for Full turns on this install, from a "Needs permission" prompt."""
+    raw = (config.get("approved_tools") or {}).get(effective_config_dir(config_dir)) or []
+    return [t for t in raw if isinstance(t, str) and APPROVABLE_TOOL.fullmatch(t)]
+
+
+_SLASH_RE = re.compile(r"(?<![\w/])/([a-z][\w-]*(?::[\w-]+)?)")
+
+
+def missing_skill(text, config_dir, config=None):
+    """{skill, alt, alt_label} when text names a /skill this install lacks and another visible one has."""
+    have = set(setup_info(config_dir)["skills"])
+    for name in (m.split(":")[-1] for m in _SLASH_RE.findall(text or "")):
+        if name in have:
+            continue
+        for p in claude_profiles(config=config):
+            if p["dir"] != config_dir and name in setup_info(p["dir"])["skills"]:
+                return {"skill": name, "alt": p["dir"], "alt_label": p["label"]}
+    return None
+
+
+def valid_agent(agent, profiles=None):
+    """{config_dir, model} when agent names a detected, visible install and a known model, else None.
+    The dir ends up in an env var and a bwrap bind, so it is never taken from the request as is."""
+    if not isinstance(agent, dict) or agent.get("model") not in AGENT_MODELS:
+        return None
+    dirs = {p["dir"] for p in (claude_profiles() if profiles is None else profiles)}
+    return {"config_dir": agent["config_dir"], "model": agent["model"]} if agent.get("config_dir") in dirs else None
+
+
+def claude_dir(home, config_dir=None):
+    # The Claude Code config dir an agent run uses: the repo's configured one, else CLAUDE_CONFIG_DIR, else ~/.claude.
+    return Path(config_dir or os.environ.get("CLAUDE_CONFIG_DIR") or Path(home) / ".claude")
+
+
+def project_dir(home, cwd, config_dir=None):
     # Claude Code names a cwd's state dir after the path with every non-alphanumeric character replaced by '-'.
-    return Path(home) / ".claude" / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
+    # Resolved: a second profile often symlinks projects/ to the first, and bwrap cannot create a mount point through a symlink.
+    return (claude_dir(home, config_dir) / "projects").resolve() / re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
 
 
 def confine_prefix(worktree, repo_root, home, turns_dir, sockets=None, exists=os.path.exists,
-                   secrets=None):
+                   secrets=None, config_dir=None):
     """bwrap argv that makes everything but the worktree and turns dir read-only for a Full turn.
     The main repo root is an overlay: agent writes there succeed and are discarded, the daemon
     commits the worktree on the host afterwards. ~/.claude stays read-only except the agent cwd's own
@@ -413,8 +556,9 @@ def confine_prefix(worktree, repo_root, home, turns_dir, sockets=None, exists=os
     prefix += [
         "--bind", worktree, worktree, "--bind", turns_dir, turns_dir,
     ]
-    writable = [str(project_dir(home, worktree))] + [f"{home}/{rel}" for rel in (
-        ".claude/session-env", ".claude/sessions", ".claude/.credentials.json", ".local/share/rtk")]
+    cdir = claude_dir(home, config_dir)
+    writable = [str(project_dir(home, worktree, config_dir))] + [str((cdir / rel).resolve()) for rel in (
+        "session-env", "sessions", ".credentials.json")] + [f"{home}/.local/share/rtk"]
     for path in writable:
         prefix += ["--bind-try", path, path]
     return prefix + ["--chdir", worktree, "--"]

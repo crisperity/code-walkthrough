@@ -350,7 +350,7 @@ def test_live_turn_and_outcome_cards_show_mode_queue_denials_and_unknown_kinds()
     assert ".cw-edits button,.cw-reload button{min-height:44px" in _real_template()
     assert "'changed by agent'" in _real_template() and "startsWith('e-')" in _real_template()
     turn = _between(wire_ask, "function turnEl(r,t,isLast){", "function upsertOutcome(")
-    assert "r.mode==='full'" in turn and "'cw-mode-badge'" in turn
+    assert "(r.mode==='full')!==fullNow" in turn and "'cw-mode-badge'" in turn
     assert "'Queued behind '+r.queued_behind" in turn
     assert "Array.isArray(r.denied)" in turn and "'Needs permission'" in turn
     progress = _between(wire_ask, "function progressText(p){", "const noteById")
@@ -1485,18 +1485,19 @@ def _access_script():
 def test_access_line_paints_the_four_agent_states_and_trust_is_confirmed_then_posted():
     _node(_access_script() + """
 const eq = (a, b, m) => { if (a !== b) throw new Error(m + ': ' + JSON.stringify(a) + ' != ' + JSON.stringify(b)); };
-const btns = () => pAccess.kids.filter(k => k.tag === 'button');
+const btns = () => accessSlot.kids.filter(k => k.tag === 'button');
 const off = {full: false, own_pr: false, full_off: {reason: 'not trusted', remedy: 'trust it', fixable: 'trust', repo: 'o/r', org: 'o'}, trusted: null};
 paintAccess(off);
-eq(pAccess.textContent.startsWith('Review only: not trusted. trust it'), true, 'off text');
+eq(accessSlot.textContent.startsWith('Review only: not trusted. trust it'), true, 'off text');
 eq(btns().map(b => b.textContent).join('|'), 'Trust o/r|Trust all of o', 'trust buttons');
 paintAccess({full: false, full_off: {reason: 'no bwrap', remedy: 'install it', fixable: null, repo: null, org: null}, trusted: null});
 eq(btns().length, 0, 'unfixable has no buttons');
 paintAccess({full: true, full_off: null, trusted: {by: 'repo', value: 'o/r'}});
-eq(pAccess.textContent.startsWith('Full access: trusted (o/r)'), true, 'trusted text');
-eq(btns().map(b => b.textContent).join('|'), 'Stop trusting', 'stop button');
+eq(accessSlot.textContent, 'Full access', 'trusted pill');
+eq(btns().length, 0, 'stop trusting lives in the menu');
+eq(JSON.stringify(trustedBy), JSON.stringify({scope: 'repo', value: 'o/r'}), 'menu knows the trust');
 paintAccess({full: true, full_off: null, trusted: {by: 'own_pr', value: null}});
-eq(pAccess.textContent, 'Full access: your PR', 'own pr');
+eq(accessSlot.textContent, 'Full access', 'own pr');
 eq(btns().length, 0, 'own pr no button');
 paintAccess(undefined);
 eq(pAccess.hidden, true, 'missing agent hidden');
@@ -1511,14 +1512,11 @@ eq(pAccess.hidden, true, 'missing agent hidden');
   eq(asked[1].includes('every repo owned by o'), true, 'org warning');
   eq(JSON.stringify(calls[0]), JSON.stringify(['/trust', {scope: 'org', action: 'add'}]), 'add body');
   await new Promise(r => setTimeout(r));
-  eq(pAccess.textContent.startsWith('Full access: trusted (o)'), true, 'repainted from response');
-  btns()[0].on.click();
-  eq(asked.length, 2, 'stop trusting has no confirm');
-  eq(JSON.stringify(calls[1]), JSON.stringify(['/trust', {scope: 'org', action: 'remove'}]), 'remove body');
+  eq(accessSlot.textContent, 'Full access', 'repainted from response');
   reply = {ok: false, body: {error: 'nope', remedy: 'retry'}};
   paintAccess(off); btns()[0].on.click();
   await new Promise(r => setTimeout(r));
-  eq(pAccess.textContent.endsWith('nope (retry)'), true, 'error shown');
+  eq(accessSlot.textContent.endsWith('nope (retry)'), true, 'error shown');
   eq(btns()[0].disabled, false, 'buttons re-enabled');
 })().catch(e => { console.error(e); process.exit(1); });
 """)
@@ -1637,7 +1635,9 @@ def test_ticket_hint_shows_a_skeleton_card_with_the_key_not_the_link_form():
 
 def test_ticket_hint_is_escaped_and_capped_and_junk_is_dropped():
     assert clean_ticket_hint({"key": "x" * 200, "found_in": "nowhere", "at": "soon"}) == {
-        "key": "x" * 80, "found_in": None, "at": None}
+        "key": "x" * 80, "found_in": None, "at": None, "run": None}
+    assert clean_ticket_hint({"key": "A-1", "run": "q-0123abcd"})["run"] == "q-0123abcd"
+    assert clean_ticket_hint({"key": "A-1", "run": "q-1\"><script>"})["run"] is None
     assert clean_ticket_hint({"key": "A-1", "found_in": ["branch"], "at": 5.5})["found_in"] is None
     assert clean_ticket_hint({"key": "A-1", "found_in": "branch", "at": 7})["at"] == 7
     assert all(clean_ticket_hint({"key": "A-1", "at": v})["at"] is None for v in (float("inf"), float("nan")))
@@ -1652,11 +1652,13 @@ def test_template_arms_the_hint_skeleton_to_become_the_prefilled_link_form_after
     arm = tpl[tpl.index("function armCtxHint()"):]
     arm = arm[:arm.index("armCtxHint();")]
 
-    assert "120000-(Date.now()-at*1000)" in arm and "sec.dataset.hintAt" in arm and "sec.__cwTimer=setTimeout" in arm
+    assert "run?600000:120000" in arm and "wait-(Date.now()-at*1000)" in arm and "sec.dataset.hintAt" in arm and "sec.__cwTimer=setTimeout" in arm
     assert "sec.isConnected" in arm and "wireCtxLink(form)" in arm and ".value=sec.dataset.ticketHint" in arm
     _order, files = parsed()
     out = context_html(None, files, "", False, {"key": "TD-1", "found_in": None, "at": 1700000000.9})
-    assert 'data-hint-at="1700000000"' in out
+    assert 'data-hint-at="1700000000"' in out and "data-hint-run" not in out
+    out = context_html(None, files, "", False, {"key": "TD-1", "found_in": None, "at": None, "run": "q-0123abcd"})
+    assert 'data-hint-run="q-0123abcd"' in out and "Fetching the ticket with your agent" in out
 
 
 def test_live_rebuilt_bursts_coalesce_and_swap_in_place_with_reload_only_for_bound_blocks():

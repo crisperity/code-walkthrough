@@ -1561,11 +1561,13 @@ def test_index_page_sets_cookie_splices_nav_once_and_parses():
                 conn.close()
             assert resp.status == 200 and cookie.startswith(f"cw_k_{daemon.port}=") and "HttpOnly" in cookie
             assert '<link rel="manifest" href="/manifest.webmanifest">' in html
-            assert html.count("window.CWNav=") == 1 and html.count("<style>") == 2
+            assert html.count("window.CWNav=") == 1 and html.count("<style>") == 3
             for placeholder in ("<!-- CW_NAV -->", "CW_FAVICON_HREF"):
                 assert placeholder not in html
             assert 'rel="icon" href="data:image/svg+xml;base64,' in html
-            assert _live_blob(html) == {"token": daemon.token, "nav": None}
+            blob = _live_blob(html)
+            assert {k: blob[k] for k in ("token", "nav")} == {"token": daemon.token, "nav": None}
+            assert blob["agents"]["models"] == ["haiku", "sonnet", "opus"]
             _node_parses(re.findall(r"<script>(.*?)</script>", html, re.S))
             assert _request(daemon, "GET", "/walkthrough/", headers={"Cookie": f"cw_k_{daemon.port}={daemon.token}"})[0] == 200
 
@@ -1606,3 +1608,53 @@ def test_static_render_has_no_nav():
     order, files = tr.parsed()
     out = tr.render_html(tr.ANALYSIS, files, tr._real_template(), now=tr.FROZEN, order=order)
     assert "cwn-" not in out and "CWNav" not in out
+
+
+def test_setups_route_names_hides_and_validates_added_folders(tmp_path, monkeypatch):
+    work, other = tmp_path / ".claude", tmp_path / ".claude-x"
+    for p in (work, other):
+        p.mkdir()
+        (p / "settings.json").write_text("{}")
+    monkeypatch.setattr(cw_server.cw_llm.Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    monkeypatch.setattr(cw_server.cw_llm, "setup_info",
+                        lambda d: {"email": None, "org": None, "plan": None, "logged_in": False, "skills": []})
+    with cw_testlib.temp_home(), cw_testlib.running_daemon() as daemon:
+        def post(body):
+            status, raw = cw_testlib.request(daemon, "POST", "/api/setups", token=daemon.token, body=json.dumps(body))
+            return status, json.loads(raw)
+        assert cw_testlib.request(daemon, "POST", "/api/setups", body="{}")[0] == 403
+        status, out = post({})
+        assert status == 200 and out["agents"]["setup_due"] is True
+        status, out = post({"setups": {str(work): {"name": " Acme "}, str(other): {"hidden": True}}, "seen": True})
+        assert status == 200 and out["agents"]["setup_due"] is False
+        assert [(s["label"], s["hidden"]) for s in out["agents"]["setups"]] == [("Acme", False), (".claude-x", True)]
+        assert post({"setups": {"/etc": {"name": "x"}}})[0] == 400
+        assert post({"setups": {str(work): {"name": "x" * 41}}})[0] == 400
+        assert post({"add": str(tmp_path)})[0] == 400          # no settings.json there
+        extra = tmp_path / "elsewhere"
+        extra.mkdir()
+        (extra / ".credentials.json").write_text("{}")
+        status, out = post({"add": str(extra)})
+        assert status == 200 and str(extra) in [s["config_dir"] for s in out["agents"]["setups"]]
+
+
+def test_a_page_older_than_the_template_is_re_rendered_once_and_a_failed_render_keeps_it(monkeypatch):
+    calls = []
+    codes = iter([0, 1])
+    monkeypatch.setattr(cw_server.subprocess, "run",
+                        lambda cmd, **k: calls.append(cmd) or subprocess.CompletedProcess(cmd, next(codes)))
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        cw_store.write_json(d / "meta.json", {"status": "done", "page": "final", "slug": "pr-1", "rev": 1})
+        page = d / "pr-1.html"
+        page.write_text("old")
+        old = cw_server._TEMPLATE.stat().st_mtime - 100
+        os.utime(page, (old, old))
+        meta = cw_server._refresh_stale_page(None, "k", "w", d, cw_store.read_meta(d), page)
+        assert meta["rev"] == 2 and len(calls) == 1 and "render" in calls[0]
+        os.utime(page, (old, old))
+        meta = cw_server._refresh_stale_page(None, "k", "w", d, meta, page)
+        assert meta["status"] == "done" and meta["rev"] == 2 and len(calls) == 2
+        assert page.stat().st_mtime > old  # touched, so the next load does not retry
+        assert cw_server._refresh_stale_page(None, "k", "w", d, meta, page) is meta and len(calls) == 2

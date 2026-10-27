@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import cw_ask
+import cw_llm
 import cw_store
 import cw_task
 import links
@@ -32,6 +33,38 @@ def repo_name(meta, d=None):
 
 def _lowered(value):
     return {x.lower() for x in value if isinstance(x, str)} if isinstance(value, list) else set()
+
+
+def remembered_agent(meta, config, d=None):
+    """The agent ({config_dir, model}) last chosen for this repo, else the last one chosen anywhere."""
+    rules = config.get("agent_rules")
+    rules = rules if isinstance(rules, dict) else {}
+    repo = (repo_name(meta, d) or "").lower()
+    for agent in ((rules.get("repos") or {}).get(repo), rules.get("last")):
+        if cw_llm.valid_agent(agent):
+            return agent
+    return None
+
+
+def current_agent(meta, config, d=None):
+    return cw_llm.valid_agent(meta.get("claude")) or remembered_agent(meta, config, d)
+
+
+def choose_agent(d, agent, remember=True):
+    """Pins agent on the walkthrough and, with remember, keeps it for its repo and as the default."""
+    meta = cw_store.read_meta(d) or {}
+    repo = (repo_name(meta, d) or "").lower()
+    cw_store.update_meta(d, lambda m: m.update({"claude": agent}))
+    if not remember:
+        return
+
+    def keep(raw):
+        rules = raw.setdefault("agent_rules", {})
+        rules["last"] = agent
+        if repo:
+            rules.setdefault("repos", {})[repo] = agent
+
+    cw_store.update_config(keep)
 
 
 def trusted_by(meta, config, d=None):

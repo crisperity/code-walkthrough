@@ -58,6 +58,8 @@
   .btn.primary kbd{border-color:currentColor;opacity:.6}
   .btn:disabled{opacity:.6;cursor:default}
   .titlerow .btn{margin-left:auto}
+  .titlerow .cwa-chip{margin-left:auto}
+  .titlerow .cwa-chip+.btn{margin-left:0}
   .titlerow .short{display:none}
   #omni{margin-top:20px}
 
@@ -451,16 +453,18 @@ function rebuild(r,btn,errEl){
   var input=r.gh_repo&&r.pr!=null?'https://github.com/'+r.gh_repo+'/pull/'+r.pr:r.target;
   if(!input){errEl.textContent='No target recorded for this walkthrough.';return;}
   btn.disabled=true;errEl.textContent='';
+  var overlay=window.CWNav&&window.CWNav.loading?window.CWNav.loading(input,false):{done:function(){}};
   var body={input:input,fresh:true};
   if(r.repo) body.repo=r.repo;
+  if(window.CW_AGENT_PICK) body.agent=window.CW_AGENT_PICK;
   fetch('/api/walkthroughs/start',{method:'POST',credentials:'same-origin',
     headers:{'Content-Type':'application/json','X-CW-Token':LIVE.token||''},body:JSON.stringify(body)})
     .then(function(x){return x.json();})
     .then(function(d){
       if(d&&d.ok&&d.result&&d.result.url){window.location.href=d.result.url;return;}
-      btn.disabled=false;
+      overlay.done();btn.disabled=false;
       errEl.textContent=(d&&d.error||'Could not start')+(d&&d.remedy?'. '+d.remedy:'');
-    },function(){btn.disabled=false;errEl.textContent='Could not reach the server.';});
+    },function(){overlay.done();btn.disabled=false;errEl.textContent='Could not reach the server.';});
 }
 
 function renderRail(){
@@ -540,6 +544,29 @@ $('body').addEventListener('dblclick',function(e){openRow(rowOf(e),false);});
 
 $('sort').addEventListener('change',function(){st.sort=this.value;render();});
 $('repo').addEventListener('change',function(){st.repo=this.value;render();});
+(function agentPick(){
+  var a=LIVE.agents;
+  if(!a||!window.CWAgent) return;
+  function setPick(){ var v=(a.setups||[]).filter(function(x){return !x.hidden;});
+    var sel=a.selected&&v.some(function(x){return x.config_dir===a.selected.config_dir;})?a.selected:null;
+    window.CW_AGENT_PICK=sel||(v[0]?{config_dir:v[0].config_dir,model:(a.selected||{}).model||'sonnet'}:null); }
+  setPick();
+  // On the index the pick only travels with the next start; the server remembers it as the default then.
+  var c=window.CWAgent.chip(a,{onPick:function(agent){ a.selected=agent; window.CW_AGENT_PICK=agent; }});
+  $('new').before(c.el);
+  function post(body){
+    return fetch('/api/setups',{method:'POST',credentials:'same-origin',
+      headers:{'Content-Type':'application/json','X-CW-Token':LIVE.token||''},body:JSON.stringify(body)})
+      .then(function(r){return r.json();})
+      .then(function(d){ if(!d||!d.ok) throw new Error((d&&d.error||'Could not save')+(d&&d.remedy?'. '+d.remedy:'')); return d.agents; });
+  }
+  function showSetup(){
+    if(document.getElementById('cwa-setup')) return;
+    $('omni').before(window.CWAgent.setupCard(a,post,function(next){ next.selected=a.selected; a=next; setPick(); c.update(a); }));
+  }
+  if(a.setup_due||location.hash==='#setups') showSetup();
+  window.addEventListener('hashchange',function(){ if(location.hash==='#setups') showSetup(); });
+})();
 $('new').addEventListener('click',function(){if(omni) omni.focus();});
 
 function typing(t){return t&&(/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)||t.isContentEditable);}

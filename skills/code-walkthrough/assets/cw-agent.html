@@ -1,0 +1,231 @@
+<style>
+/* Claude account + model picker, shared by the index page and the walkthrough page (spliced with cw-nav). */
+.cwa-spark{width:16px;height:16px;flex:none;color:#D97757}
+.cwa-chip{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 10px 0 9px;border-radius:999px;
+  background:var(--panel2);color:var(--text);border:0;font:inherit;font-size:14px;cursor:pointer;white-space:nowrap}
+.cwa-chip.cwa-sm{height:28px;font-size:13px;padding:0 9px 0 7px}
+.cwa-chip b{font-weight:600}.cwa-chip .cwa-dim{color:var(--muted)}
+.cwa-chip svg.cwa-caret{width:10px;height:10px;color:var(--muted)}
+.cwa-chip:hover{background:var(--border)}
+.cwa-chip:focus-visible,.cwa-pop button:focus-visible,.cwa-setup input:focus-visible,.cwa-setup button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.cwa-chip[aria-expanded=true]{box-shadow:0 0 0 2px var(--accent)}
+.cwa-pop{position:fixed;z-index:1000;width:min(380px,calc(100vw - 24px));background:var(--panel);color:var(--text);
+  border-radius:12px;padding:14px;box-shadow:0 12px 32px rgba(0,0,0,.35);font-size:14px}
+.cwa-pop h4{margin:0 0 8px;font-size:13px;font-weight:600;color:var(--muted)}
+.cwa-rows{display:grid;gap:4px;margin-bottom:14px}
+.cwa-row{display:flex;gap:10px;align-items:flex-start;width:100%;padding:10px;border-radius:10px;border:0;
+  background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.cwa-row:hover{background:var(--panel2)}
+.cwa-row[aria-checked=true]{background:color-mix(in srgb,var(--accent) 14%,var(--panel))}
+.cwa-badge{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;flex:none;
+  background:color-mix(in srgb,#D97757 16%,transparent)}
+.cwa-badge .cwa-spark{width:20px;height:20px}
+.cwa-t{flex:1;min-width:0}.cwa-t b{display:block;font-weight:600}
+.cwa-t span{display:block;color:var(--muted);font-size:12.5px;line-height:1.45;overflow:hidden;text-overflow:ellipsis}
+.cwa-tick{width:16px;height:16px;color:var(--accent);flex:none;margin-top:7px;visibility:hidden}
+.cwa-row[aria-checked=true] .cwa-tick{visibility:visible}
+.cwa-seg{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;background:var(--panel2);padding:4px;border-radius:10px}
+.cwa-seg button{border:0;border-radius:7px;padding:8px 10px;background:transparent;color:var(--text);font:inherit;text-align:left;cursor:pointer}
+.cwa-seg button b{display:block;font-weight:600}.cwa-seg button span{font-size:12px;color:var(--muted)}
+.cwa-seg button[aria-checked=true]{background:var(--accent);color:var(--bg)}
+.cwa-seg button[aria-checked=true] span{color:inherit;opacity:.85}
+.cwa-foot{display:flex;align-items:center;gap:8px;margin-top:14px;font-size:13px;color:var(--muted)}
+.cwa-foot input{accent-color:var(--accent);width:16px;height:16px;margin:0}
+.cwa-foot b{color:var(--text);font-weight:600}
+.cwa-manage{display:block;margin-top:12px;color:var(--accent);font-size:13px;font-weight:600;text-decoration:none}
+.cwa-err{margin:10px 0 0;color:var(--red,#e06c75);font-size:13px}
+.cwa-by{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted);margin:4px 0}
+.cwa-by .cwa-spark{margin:0}
+.cwa-by b{color:var(--text);font-weight:600}
+.cwa-warn{margin-top:8px;padding:8px 10px;border-radius:8px;font-size:13px;
+  background:color-mix(in srgb,var(--yellow,#e0af68) 16%,var(--panel));color:var(--text)}
+.cwa-warn button{margin-left:6px;border:0;background:transparent;color:var(--accent);font:inherit;font-weight:600;cursor:pointer;padding:0}
+.cwa-setup{background:var(--panel);border-radius:12px;padding:20px;margin-top:16px}
+.cwa-setup h2{margin:0;font-size:20px;letter-spacing:-.01em}
+.cwa-setup .cwa-lead{margin:6px 0 18px;color:var(--muted);line-height:1.5}
+.cwa-inst{display:grid;grid-template-columns:34px 1fr 200px;gap:12px;align-items:center;padding:12px;border-radius:10px;background:var(--bg)}
+.cwa-inst+.cwa-inst{margin-top:8px}
+.cwa-inst.cwa-off .cwa-badge,.cwa-inst.cwa-off .cwa-t{opacity:.55}
+.cwa-name{display:grid;gap:4px;min-width:0}
+.cwa-name label{font-size:12px;color:var(--muted)}
+.cwa-name input[type=text]{box-sizing:border-box;width:100%;min-width:0;font:inherit;color:var(--text);background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:7px 9px}
+.cwa-skip{font-size:12.5px;color:var(--muted);display:flex;gap:6px;align-items:center}
+.cwa-skip input{accent-color:var(--accent);margin:0}
+.cwa-add{margin-top:10px;background:transparent;border:0;color:var(--accent);font:inherit;font-weight:600;padding:6px 0;cursor:pointer}
+.cwa-actions{display:flex;gap:10px;align-items:center;margin-top:18px}
+.cwa-save{height:36px;padding:0 16px;border-radius:999px;border:0;font:inherit;font-weight:600;background:var(--accent);color:var(--bg);cursor:pointer}
+.cwa-later{height:36px;padding:0 12px;border-radius:999px;border:0;font:inherit;background:transparent;color:var(--muted);cursor:pointer}
+@media (max-width:560px){.cwa-inst{grid-template-columns:34px 1fr}.cwa-name,.cwa-skip{grid-column:1/-1}}
+</style>
+<script>
+(function(){
+'use strict';
+var NS='http://www.w3.org/2000/svg';
+var MODELS={haiku:['Haiku','Fastest'],sonnet:['Sonnet','Balanced'],opus:['Opus','Deepest']};
+function el(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;}
+function svg(cls,vb,build){var s=document.createElementNS(NS,'svg');s.setAttribute('class',cls);s.setAttribute('viewBox',vb);
+  s.setAttribute('aria-hidden','true');build(s);return s;}
+function spark(){
+  // Twelve rounded rays of uneven length, drawn in Claude's orange.
+  var lens=[8.6,7,9,7.4,8.4,7,9,7.2,8.6,7,8.8,7.4];
+  return svg('cwa-spark','-12 -12 24 24',function(s){lens.forEach(function(h,i){
+    var r=document.createElementNS(NS,'rect');
+    r.setAttribute('x','-1.3');r.setAttribute('y','-11');r.setAttribute('width','2.6');r.setAttribute('height',String(h));
+    r.setAttribute('rx','1.3');r.setAttribute('fill','currentColor');r.setAttribute('transform','rotate('+(i*30)+')');s.appendChild(r);});});
+}
+function path(cls,vb,d,w){return svg(cls,vb,function(s){var p=document.createElementNS(NS,'path');p.setAttribute('d',d);
+  p.setAttribute('fill','none');p.setAttribute('stroke','currentColor');p.setAttribute('stroke-width',w);
+  p.setAttribute('stroke-linecap','round');p.setAttribute('stroke-linejoin','round');s.appendChild(p);});}
+function modelName(m){return (MODELS[m]||[m])[0];}
+function visible(a){return (a.setups||[]).filter(function(s){return !s.hidden;});}
+function current(a){
+  var vis=visible(a), sel=a.selected||{};
+  var s=vis.filter(function(x){return x.config_dir===sel.config_dir;})[0]||vis[0];
+  return s?{setup:s,model:sel.model||'sonnet'}:null;
+}
+function who(s){
+  if(!s.logged_in) return 'Not signed in';
+  return [s.email,s.plan&&(s.plan.charAt(0).toUpperCase()+s.plan.slice(1)+' plan')].filter(Boolean).join(' · ');
+}
+
+// The chip and its popover. opts: {small, remember: show "use for <repo>", onPick(agent,remember) -> Promise}.
+function chip(a,opts){
+  opts=opts||{};
+  var btn=el('button','cwa-chip'+(opts.small?' cwa-sm':''));
+  btn.type='button';btn.setAttribute('aria-haspopup','dialog');btn.setAttribute('aria-expanded','false');
+  var pop=null;
+  function paint(){
+    var c=current(a);
+    btn.hidden=!c;
+    if(!c) return;
+    btn.replaceChildren(spark(),el('b',null,c.setup.label),el('span','cwa-dim',modelName(c.model)),
+      path('cwa-caret','0 0 10 10','M2 3.5l3 3 3-3','1.6'));
+    btn.setAttribute('aria-label','Agent: '+c.setup.label+', '+modelName(c.model)+'. Change');
+  }
+  function close(){ if(!pop) return; pop.remove(); pop=null; btn.setAttribute('aria-expanded','false');
+    document.removeEventListener('mousedown',outside,true); document.removeEventListener('keydown',esc,true); }
+  function outside(e){ if(pop&&!pop.contains(e.target)&&!btn.contains(e.target)) close(); }
+  function esc(e){ if(e.key==='Escape'){ e.preventDefault(); close(); btn.focus(); } }
+  function place(){
+    var r=btn.getBoundingClientRect(), w=pop.offsetWidth;
+    pop.style.top=Math.min(r.bottom+8,window.innerHeight-pop.offsetHeight-12)+'px';
+    pop.style.left=Math.max(12,Math.min(r.right-w,window.innerWidth-w-12))+'px';
+  }
+  function pick(agent,err){
+    var remember=!opts.remember||!pop||!pop.querySelector('.cwa-foot input')||pop.querySelector('.cwa-foot input').checked;
+    err.textContent='';
+    Promise.resolve(opts.onPick?opts.onPick(agent,remember):null).then(function(){
+      a.selected=agent; paint(); if(pop) build();
+    },function(m){ err.textContent=(m&&m.message)||String(m||'Could not save'); });
+  }
+  function build(){
+    var c=current(a), err=el('p','cwa-err');err.setAttribute('role','alert');
+    var rows=el('div','cwa-rows');rows.setAttribute('role','radiogroup');rows.setAttribute('aria-label','Claude account');
+    visible(a).forEach(function(s){
+      var row=el('button','cwa-row');row.type='button';row.setAttribute('role','radio');
+      row.setAttribute('aria-checked',String(c&&s.config_dir===c.setup.config_dir));
+      var badge=el('span','cwa-badge');badge.append(spark());
+      var t=el('span','cwa-t');t.append(el('b',null,s.label),el('span',null,who(s)),
+        el('span',null,s.skills_count+' skills · '+s.folder));
+      row.append(badge,t,path('cwa-tick','0 0 16 16','M3.5 8.5l3 3 6-7','2'));
+      row.addEventListener('click',function(){ pick({config_dir:s.config_dir,model:c.model},err); });
+      rows.append(row);
+    });
+    var seg=el('div','cwa-seg');seg.setAttribute('role','radiogroup');seg.setAttribute('aria-label','Model');
+    (a.models||[]).forEach(function(m){
+      var b=el('button');b.type='button';b.setAttribute('role','radio');b.setAttribute('aria-checked',String(c&&m===c.model));
+      b.append(el('b',null,modelName(m)),el('span',null,(MODELS[m]||[])[1]||''));
+      b.addEventListener('click',function(){ pick({config_dir:c.setup.config_dir,model:m},err); });
+      seg.append(b);
+    });
+    var kids=[el('h4',null,'Claude account'),rows,el('h4',null,'Model'),seg];
+    if(opts.remember&&a.repo){
+      var lab=el('label','cwa-foot'), box=el('input');box.type='checkbox';box.checked=true;
+      lab.append(box,document.createTextNode('Use this for '),el('b',null,a.repo),document.createTextNode(' next time'));
+      kids.push(lab);
+    }
+    var manage=el('a','cwa-manage','Manage setups');manage.href='/walkthrough/#setups';
+    kids.push(manage,err);
+    pop.replaceChildren.apply(pop,kids);
+  }
+  btn.addEventListener('click',function(){
+    if(pop){ close(); return; }
+    pop=el('div','cwa-pop');pop.setAttribute('role','dialog');pop.setAttribute('aria-label','Choose agent');
+    build(); document.body.append(pop); place(); btn.setAttribute('aria-expanded','true');
+    document.addEventListener('mousedown',outside,true); document.addEventListener('keydown',esc,true);
+    var on=pop.querySelector('[aria-checked=true]'); if(on) on.focus();
+  });
+  paint();
+  return {el:btn,update:function(next){ a=next; paint(); if(pop) build(); },close:close};
+}
+
+// "Who answered" line for a thread turn, plus the missing-skill hint. onRetry(alt) re-asks on alt.
+function turnBadge(r,onRetry){
+  if(!r||!r.setup) return null;
+  var wrap=el('div');
+  var by=el('div','cwa-by');by.append(spark(),el('b',null,r.setup+(r.model?' · '+modelName(r.model):'')));
+  wrap.append(by);
+  var ms=r.missing_skill;
+  if(ms&&ms.alt_label){
+    var w=el('div','cwa-warn',r.setup+' has no '+ms.skill+' skill.');
+    if(onRetry){ var b=el('button',null,'Retry with '+ms.alt_label);b.type='button';
+      b.addEventListener('click',function(){ b.disabled=true; onRetry(ms.alt,r); }); w.append(b); }
+    wrap.append(w);
+  }
+  return wrap;
+}
+
+// First-run naming step. post(body) -> Promise of the new agents payload.
+function setupCard(a,post,onDone){
+  var card=el('section','cwa-setup');card.id='cwa-setup';card.setAttribute('aria-labelledby','cwa-setup-h');
+  function render(){
+    var all=a.setups||[], err=el('p','cwa-err');err.setAttribute('role','alert');
+    var h=el('h2',null,'We found '+all.length+' Claude Code setup'+(all.length===1?'':'s')+' on this computer');h.id='cwa-setup-h';
+    var rows=all.map(function(s,i){
+      var row=el('div','cwa-inst'+(s.hidden?' cwa-off':''));row.dataset.dir=s.config_dir;
+      var badge=el('span','cwa-badge');badge.append(spark());
+      var t=el('div','cwa-t');t.append(el('b',null,s.logged_in?(s.email||'Signed in'):'Not signed in'),
+        el('span',null,s.folder+(s.plan?' · '+s.plan.charAt(0).toUpperCase()+s.plan.slice(1)+' plan':'')),
+        el('span',null,s.skills_count+' skills'));
+      var side=el('div','cwa-name');
+      var lab=el('label',null,'Name');lab.htmlFor='cwa-n'+i;
+      var inp=el('input');inp.type='text';inp.id='cwa-n'+i;inp.maxLength=40;inp.placeholder=s.folder;
+      inp.value=s.named?s.label:'';
+      var skip=el('label','cwa-skip'), box=el('input');box.type='checkbox';box.checked=s.hidden;
+      box.addEventListener('change',function(){ row.classList.toggle('cwa-off',box.checked); inp.disabled=box.checked; });
+      inp.disabled=s.hidden;
+      skip.append(box,document.createTextNode("Don't use"));
+      side.append(lab,inp,skip);
+      row.append(badge,t,side);
+      return row;
+    });
+    var add=el('button','cwa-add','Add a folder…');add.type='button';
+    add.addEventListener('click',function(){
+      var dir=window.prompt('Folder of another Claude Code setup (the one holding settings.json):','~/');
+      if(!dir) return;
+      post({add:dir}).then(function(next){ a=next; render(); },function(m){ err.textContent=String(m.message||m); });
+    });
+    var save=el('button','cwa-save','Save');save.type='button';
+    var later=el('button','cwa-later','Later');later.type='button';
+    save.addEventListener('click',function(){
+      var setups={};
+      card.querySelectorAll('.cwa-inst').forEach(function(row){
+        setups[row.dataset.dir]={name:row.querySelector('input[type=text]').value.trim(),
+          hidden:row.querySelector('input[type=checkbox]').checked};
+      });
+      save.disabled=true;
+      post({setups:setups,seen:true}).then(function(next){ card.remove(); onDone(next); },
+        function(m){ save.disabled=false; err.textContent=String(m.message||m); });
+    });
+    later.addEventListener('click',function(){ post({seen:true}).then(function(next){ card.remove(); onDone(next); }); });
+    var acts=el('div','cwa-actions');acts.append(save,later);
+    card.replaceChildren.apply(card,[h,el('p','cwa-lead','Name the ones you want to use for walkthroughs. You pick between them when you start one.')]
+      .concat(rows,[add,acts,err]));
+  }
+  render();
+  return card;
+}
+
+window.CWAgent={chip:chip,turnBadge:turnBadge,setupCard:setupCard,spark:spark};
+})();
+</script>
