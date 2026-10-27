@@ -60,6 +60,18 @@
 @media (hover:none),(pointer:coarse){
   .cwn-kbd,.cwn-foot{display:none}
 }
+/* Shown while /api/walkthroughs/start runs: it fetches the PR, maybe clones, and reads the diff before a page exists. */
+.cwn-load{position:fixed;inset:0;z-index:2000;display:grid;place-items:center;background:color-mix(in srgb,var(--bg) 82%,transparent);
+  font:14px/1.5 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:var(--text)}
+.cwn-load-card{width:min(440px,calc(100vw - 32px));background:var(--panel);border-radius:12px;padding:22px;box-shadow:0 12px 32px rgba(0,0,0,.35)}
+.cwn-load-top{display:flex;gap:12px;align-items:center}
+.cwn-load h2{margin:0;font-size:17px;font-weight:600}
+.cwn-spin{width:22px;height:22px;flex:none;border-radius:50%;border:3px solid var(--panel2);border-top-color:var(--accent);animation:cwn-spin .8s linear infinite}
+@keyframes cwn-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.cwn-spin{animation:none;border-top-color:var(--panel2);background:var(--accent);transform:scale(.5)}}
+.cwn-load-target{margin:12px 0 0;word-break:break-all;color:var(--text)}
+.cwn-load-what{margin:6px 0 0;color:var(--muted)}
+.cwn-load-meta{display:flex;justify-content:space-between;gap:12px;margin-top:14px;font-size:13px;color:var(--muted)}
 </style>
 <script>
 (function(){
@@ -117,6 +129,26 @@ function rowMatches(r,q){
 }
 var STATUS={building:'Building',done:'Done',failed:'Failed'};
 var KIND={pr:'Pull request',range:'Branch range',commit:'Single commit'};
+
+// A blocking "Starting…" card with the target, the agent, what is happening and the elapsed time.
+// ponytail: the server does not report phases yet; stream them from start if this stays too vague.
+function loading(target,clone){
+  var a=LIVE.agents||(LIVE.agent&&LIVE.agent.picker)||{}, pick=window.CW_AGENT_PICK||a.selected||null;
+  var setup=pick&&(a.setups||[]).filter(function(x){return x.config_dir===pick.config_dir;})[0];
+  var box=el('div','cwn-load'); box.setAttribute('role','status'); box.setAttribute('aria-live','polite');
+  var card=el('div','cwn-load-card'), top=el('div','cwn-load-top'), what=el('p','cwn-load-what');
+  top.append(el('span','cwn-spin'),el('h2',null,'Starting walkthrough'));
+  var meta=el('div','cwn-load-meta'), who=el('span',null,setup?'Agent: '+setup.label+' · '+pick.model.charAt(0).toUpperCase()+pick.model.slice(1):''), secs=el('span',null,'0 s');
+  meta.append(who,secs);
+  what.textContent=clone?'Cloning the repository, then reading the PR and its diff.':'Fetching the branches and reading the diff.';
+  card.append(top,el('p','cwn-load-target',target||'Rebuilding'),what,meta);
+  box.append(card); document.body.append(box);
+  var t0=Date.now(), timer=setInterval(function(){
+    var n=Math.round((Date.now()-t0)/1000); secs.textContent=n+' s';
+    if(n===15) what.textContent+=' A big PR or a first fetch can take a minute.';
+  },1000);
+  return {done:function(){ clearInterval(timer); box.remove(); }};
+}
 
 function makeOmni(host,o){
   var palette=!!o.palette, id=++uid;
@@ -275,6 +307,7 @@ function makeOmni(host,o){
 
   function start(extra){
     if(s.busy) return;
+    var overlay=loading(s.q.trim(),extra&&extra.clone);
     var body={input:s.q.trim()};
     for(var k in extra) body[k]=extra[k];
     if(window.CW_AGENT_PICK) body.agent=window.CW_AGENT_PICK; // the account and model chosen on the index page
@@ -287,6 +320,7 @@ function makeOmni(host,o){
         throw d||{};
       })
       .catch(function(d){
+        overlay.done();
         s.busy=false;
         s.err={error:d.error||(d.message?'Request failed: '+d.message:'Could not start'),remedy:d.remedy||''};
         render();
@@ -462,6 +496,7 @@ window.CWNav={
     return {input:inline.input,focus:inline.focus,clear:inline.reset};
   },
   openPalette:openPalette,
+  loading:loading,
   markSVG:markSVG,
   matches:rowMatches
 };

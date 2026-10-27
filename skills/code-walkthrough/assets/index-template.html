@@ -453,6 +453,7 @@ function rebuild(r,btn,errEl){
   var input=r.gh_repo&&r.pr!=null?'https://github.com/'+r.gh_repo+'/pull/'+r.pr:r.target;
   if(!input){errEl.textContent='No target recorded for this walkthrough.';return;}
   btn.disabled=true;errEl.textContent='';
+  var overlay=window.CWNav&&window.CWNav.loading?window.CWNav.loading(input,false):{done:function(){}};
   var body={input:input,fresh:true};
   if(r.repo) body.repo=r.repo;
   if(window.CW_AGENT_PICK) body.agent=window.CW_AGENT_PICK;
@@ -461,9 +462,9 @@ function rebuild(r,btn,errEl){
     .then(function(x){return x.json();})
     .then(function(d){
       if(d&&d.ok&&d.result&&d.result.url){window.location.href=d.result.url;return;}
-      btn.disabled=false;
+      overlay.done();btn.disabled=false;
       errEl.textContent=(d&&d.error||'Could not start')+(d&&d.remedy?'. '+d.remedy:'');
-    },function(){btn.disabled=false;errEl.textContent='Could not reach the server.';});
+    },function(){overlay.done();btn.disabled=false;errEl.textContent='Could not reach the server.';});
 }
 
 function renderRail(){
