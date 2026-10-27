@@ -350,7 +350,7 @@ def test_live_turn_and_outcome_cards_show_mode_queue_denials_and_unknown_kinds()
     assert ".cw-edits button,.cw-reload button{min-height:44px" in _real_template()
     assert "'changed by agent'" in _real_template() and "startsWith('e-')" in _real_template()
     turn = _between(wire_ask, "function turnEl(r,t,isLast){", "function upsertOutcome(")
-    assert "r.mode==='full'" in turn and "'cw-mode-badge'" in turn
+    assert "(r.mode==='full')!==fullNow" in turn and "'cw-mode-badge'" in turn
     assert "'Queued behind '+r.queued_behind" in turn
     assert "Array.isArray(r.denied)" in turn and "'Needs permission'" in turn
     progress = _between(wire_ask, "function progressText(p){", "const noteById")
@@ -1485,18 +1485,19 @@ def _access_script():
 def test_access_line_paints_the_four_agent_states_and_trust_is_confirmed_then_posted():
     _node(_access_script() + """
 const eq = (a, b, m) => { if (a !== b) throw new Error(m + ': ' + JSON.stringify(a) + ' != ' + JSON.stringify(b)); };
-const btns = () => pAccess.kids.filter(k => k.tag === 'button');
+const btns = () => accessSlot.kids.filter(k => k.tag === 'button');
 const off = {full: false, own_pr: false, full_off: {reason: 'not trusted', remedy: 'trust it', fixable: 'trust', repo: 'o/r', org: 'o'}, trusted: null};
 paintAccess(off);
-eq(pAccess.textContent.startsWith('Review only: not trusted. trust it'), true, 'off text');
+eq(accessSlot.textContent.startsWith('Review only: not trusted. trust it'), true, 'off text');
 eq(btns().map(b => b.textContent).join('|'), 'Trust o/r|Trust all of o', 'trust buttons');
 paintAccess({full: false, full_off: {reason: 'no bwrap', remedy: 'install it', fixable: null, repo: null, org: null}, trusted: null});
 eq(btns().length, 0, 'unfixable has no buttons');
 paintAccess({full: true, full_off: null, trusted: {by: 'repo', value: 'o/r'}});
-eq(pAccess.textContent.startsWith('Full access: trusted (o/r)'), true, 'trusted text');
-eq(btns().map(b => b.textContent).join('|'), 'Stop trusting', 'stop button');
+eq(accessSlot.textContent, 'Full access', 'trusted pill');
+eq(btns().length, 0, 'stop trusting lives in the menu');
+eq(JSON.stringify(trustedBy), JSON.stringify({scope: 'repo', value: 'o/r'}), 'menu knows the trust');
 paintAccess({full: true, full_off: null, trusted: {by: 'own_pr', value: null}});
-eq(pAccess.textContent, 'Full access: your PR', 'own pr');
+eq(accessSlot.textContent, 'Full access', 'own pr');
 eq(btns().length, 0, 'own pr no button');
 paintAccess(undefined);
 eq(pAccess.hidden, true, 'missing agent hidden');
@@ -1511,14 +1512,11 @@ eq(pAccess.hidden, true, 'missing agent hidden');
   eq(asked[1].includes('every repo owned by o'), true, 'org warning');
   eq(JSON.stringify(calls[0]), JSON.stringify(['/trust', {scope: 'org', action: 'add'}]), 'add body');
   await new Promise(r => setTimeout(r));
-  eq(pAccess.textContent.startsWith('Full access: trusted (o)'), true, 'repainted from response');
-  btns()[0].on.click();
-  eq(asked.length, 2, 'stop trusting has no confirm');
-  eq(JSON.stringify(calls[1]), JSON.stringify(['/trust', {scope: 'org', action: 'remove'}]), 'remove body');
+  eq(accessSlot.textContent, 'Full access', 'repainted from response');
   reply = {ok: false, body: {error: 'nope', remedy: 'retry'}};
   paintAccess(off); btns()[0].on.click();
   await new Promise(r => setTimeout(r));
-  eq(pAccess.textContent.endsWith('nope (retry)'), true, 'error shown');
+  eq(accessSlot.textContent.endsWith('nope (retry)'), true, 'error shown');
   eq(btns()[0].disabled, false, 'buttons re-enabled');
 })().catch(e => { console.error(e); process.exit(1); });
 """)
