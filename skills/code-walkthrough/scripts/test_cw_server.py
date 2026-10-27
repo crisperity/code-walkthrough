@@ -1637,3 +1637,24 @@ def test_setups_route_names_hides_and_validates_added_folders(tmp_path, monkeypa
         (extra / ".credentials.json").write_text("{}")
         status, out = post({"add": str(extra)})
         assert status == 200 and str(extra) in [s["config_dir"] for s in out["agents"]["setups"]]
+
+
+def test_a_page_older_than_the_template_is_re_rendered_once_and_a_failed_render_keeps_it(monkeypatch):
+    calls = []
+    codes = iter([0, 1])
+    monkeypatch.setattr(cw_server.subprocess, "run",
+                        lambda cmd, **k: calls.append(cmd) or subprocess.CompletedProcess(cmd, next(codes)))
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        cw_store.write_json(d / "meta.json", {"status": "done", "page": "final", "slug": "pr-1", "rev": 1})
+        page = d / "pr-1.html"
+        page.write_text("old")
+        old = cw_server._TEMPLATE.stat().st_mtime - 100
+        os.utime(page, (old, old))
+        meta = cw_server._refresh_stale_page(None, "k", "w", d, cw_store.read_meta(d), page)
+        assert meta["rev"] == 2 and len(calls) == 1 and "render" in calls[0]
+        os.utime(page, (old, old))
+        meta = cw_server._refresh_stale_page(None, "k", "w", d, meta, page)
+        assert meta["status"] == "done" and meta["rev"] == 2 and len(calls) == 2
+        assert page.stat().st_mtime > old  # touched, so the next load does not retry
+        assert cw_server._refresh_stale_page(None, "k", "w", d, meta, page) is meta and len(calls) == 2

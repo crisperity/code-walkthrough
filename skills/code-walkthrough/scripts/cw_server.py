@@ -499,6 +499,35 @@ def _clean_context_arg(context):
     return clean
 
 
+_TEMPLATE = _ASSETS / "diff-review-template.html"
+
+
+def _refresh_stale_page(daemon, key, wid, d, meta, page_path):
+    """A finished page is baked from the template at build time; after a skill upgrade, re-render
+    it once so old walkthroughs get the new UI. Any failure keeps serving the old page."""
+    if meta.get("status") != "done" or meta.get("page") != "final":
+        return meta
+    try:
+        if page_path.stat().st_mtime >= _TEMPLATE.stat().st_mtime:
+            return meta
+        with cw_store.dir_lock(d):
+            fresh = cw_store.read_meta(d) or meta
+            if page_path.stat().st_mtime >= _TEMPLATE.stat().st_mtime:
+                return fresh
+            args = ["render", "--dir", str(d), "--slug", fresh["slug"]]
+            if fresh.get("title"):
+                args += ["--title", fresh["title"]]
+            args += cw_run._hint_args(fresh)
+            ok = subprocess.run([sys.executable, str(cw_run.SCRIPTS_DIR / "pipeline.py"), *args],
+                                capture_output=True, text=True).returncode == 0
+            if not ok:  # keep the old page; touch it so we don't retry on every load
+                os.utime(page_path)
+                return fresh
+            return cw_store.update_meta(d, lambda m: m.update({"rev": m.get("rev", 0) + 1}))
+    except (OSError, KeyError, cw_store.CWError):
+        return meta
+
+
 def _write_context(daemon, key, wid, d, clean):
     _rerender(daemon, key, wid, d, lambda: cw_store.write_json(d / "context.json", clean))
 
@@ -869,6 +898,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_text(503, "page not built yet, reload in a moment")
             return
         daemon = self.server.cw_daemon
+        meta = _refresh_stale_page(daemon, key, wid, d, meta, page_path)
         live = _live_payload(key, wid, meta, d, daemon.token, daemon.port)
         live["nav"] = cw_index.page_nav(cw_index.scan(threads=False), key, wid)
         blob = json.dumps(live, ensure_ascii=True).replace("<", "\\u003c")
