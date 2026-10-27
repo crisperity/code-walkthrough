@@ -1746,6 +1746,13 @@ def prepare_walkthrough(params, is_running=None, edit_guard=None):
         })
         if cw_llm.valid_agent(params.get("claude")):
             meta["claude"] = params["claude"]  # the Claude account and model picked at start
+        elif not cw_llm.valid_agent(meta.get("claude")):
+            # Started without a pick (the MCP tool): pin the remembered one, else turns would run on
+            # whatever CLAUDE_CONFIG_DIR the daemon inherited while the chip shows another account.
+            import cw_agent
+            remembered = cw_agent.remembered_agent(meta, config, d)
+            if remembered:
+                meta["claude"] = remembered
         meta["updated_at"] = now
         cw_store.write_json(d / "meta.json", meta)
 

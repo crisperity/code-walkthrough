@@ -713,3 +713,14 @@ def test_approved_mcp_tools_reach_later_full_turns_and_only_mcp_names_are_accept
         argv = next(e["argv"] for e in fc.log() if "--setting-sources" in e["argv"])
         allowed = next(a for a in argv if a.startswith("--allowedTools="))
         assert "mcp__plugin_core_axon__jira-get-issue" in allowed and "mcp__cw__set_context" in allowed
+
+
+def test_a_walkthrough_started_without_a_pick_pins_the_remembered_agent(monkeypatch):
+    import cw_run
+    with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
+        monkeypatch.setattr(cw_agent.cw_llm, "claude_profiles", lambda home=None: [{"dir": "/c/work", "label": "work"}])
+        agent = {"config_dir": "/c/work", "model": "opus"}
+        repo, params = _prepare_params(tmp, home)
+        cw_store.update_config(lambda c: c.update(agent_rules={"last": agent}))
+        d, meta, _ = cw_run.prepare_walkthrough(params)
+        assert cw_store.read_meta(d)["claude"] == agent
