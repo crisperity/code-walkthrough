@@ -659,9 +659,9 @@ def test_chosen_agent_is_remembered_for_the_repo_and_as_default(tmp_path, monkey
     cw_store.write_json(d / "meta.json", {"gh_repo": "Acme/Api"})
     agent = {"config_dir": "/c/work", "model": "haiku"}
     cw_agent.choose_agent(d, agent)
-    assert cw_store.read_meta(d)["agent"] == agent
+    assert cw_store.read_meta(d)["claude"] == agent
     config = cw_store.load_config()
     assert config["agent_rules"] == {"last": agent, "repos": {"acme/api": agent}}
     assert cw_agent.current_agent({"gh_repo": "acme/api"}, config) == agent        # same repo, new walkthrough
     assert cw_agent.current_agent({"gh_repo": "other/repo"}, config) == agent      # falls back to the last choice
-    assert cw_agent.current_agent({"gh_repo": "acme/api", "agent": {"config_dir": "/x", "model": "haiku"}}, config) == agent  # stale pin ignored
+    assert cw_agent.current_agent({"gh_repo": "acme/api", "claude": {"config_dir": "/x", "model": "haiku"}}, config) == agent  # stale pin ignored

@@ -277,6 +277,7 @@ function makeOmni(host,o){
     if(s.busy) return;
     var body={input:s.q.trim()};
     for(var k in extra) body[k]=extra[k];
+    if(window.CW_AGENT_PICK) body.agent=window.CW_AGENT_PICK; // the account and model chosen on the index page
     s.busy=true;s.err=null;render();
     fetch('/api/walkthroughs/start',{method:'POST',credentials:'same-origin',
       headers:headers({'Content-Type':'application/json'}),body:JSON.stringify(body)})

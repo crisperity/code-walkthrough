@@ -152,6 +152,11 @@ def _verify_ref(toplevel, ref):
     return result.stdout.strip()
 
 
+def _agent_of(d):
+    """The Claude account and model the user picked for this walkthrough, if still valid."""
+    return cw_llm.valid_agent((cw_store.read_meta(d) or {}).get("claude"))
+
+
 def gh_env(meta):
     """(repo, env) for a gh subprocess: this walkthrough's repo and the environment with
     both GH_TOKEN and GITHUB_TOKEN removed, so a shared daemon never posts under whichever
@@ -353,7 +358,7 @@ def _make_on_usage(d, role, on_event, config):
             u["calls"] += 1
             u["prompt_tokens"] += usage.get("prompt_tokens", 0)
             u["completion_tokens"] += usage.get("completion_tokens", 0)
-            profile = cw_store.role_profile(config, role)
+            profile = cw_store.role_profile(config, role, agent=_agent_of(d))
             cost = cw_llm.cost_usd(profile, usage) if profile else None
             if cost is not None:
                 u["cost_usd"] = (u.get("cost_usd") or 0.0) + cost
@@ -589,7 +594,7 @@ def _submit_fragment_handler(d, n, batch_diff, seed, state):
 
 
 def _run_fragment_conversation(d, n, entry, config, on_event, role, extra_lines=None, hint=None):
-    profile = cw_store.role_profile(config, role)
+    profile = cw_store.role_profile(config, role, agent=_agent_of(d))
     if profile is None:
         return False, None, [f"no profile for role {role}"], None
 
@@ -660,7 +665,7 @@ def _run_batch(d, n, entry, config, on_event):
     problems = []
     last_error = None
     for role in ("analysis", "escalate"):
-        profile = cw_store.role_profile(config, role)
+        profile = cw_store.role_profile(config, role, agent=_agent_of(d))
         if profile is None:
             continue
         attempts += 1
@@ -781,7 +786,7 @@ def _run_prose(d, meta, config, on_event, batch_count):
     _, diff_files = parse_hunks(raw_diff)
     diff_paths = set(diff_files)
 
-    profile = cw_store.role_profile(config, "prose")
+    profile = cw_store.role_profile(config, "prose", agent=_agent_of(d))
     if profile is None:
         _emit_step(d, on_event, "prose", "failed", error="no profile for role prose")
         return "failed", ["no profile for role prose"]
@@ -948,8 +953,8 @@ def _run_visuals(d, meta, config, on_event, force=False):
         if not analysis or (not n_groups and not visuals.symbol_digest(symdelta) and not need_calls):
             _emit_step(d, on_event, "visuals", "skipped")
             return False
-        role = "visuals" if cw_store.role_profile(config, "visuals") else "prose"
-        profile = cw_store.role_profile(config, role)
+        role = "visuals" if cw_store.role_profile(config, "visuals", agent=_agent_of(d)) else "prose"
+        profile = cw_store.role_profile(config, role, agent=_agent_of(d))
         if profile is None:
             _emit_step(d, on_event, "visuals", "failed", error="no profile for role prose")
             return False
@@ -1076,7 +1081,7 @@ def _run_small(d, meta, config, on_event):
     problems = []
     last_exc = None
     for role in ("prose", "escalate"):
-        profile = cw_store.role_profile(config, role)
+        profile = cw_store.role_profile(config, role, agent=_agent_of(d))
         if profile is None:
             continue
         attempts += 1
@@ -1293,7 +1298,7 @@ def _thread_worker(d, n, seed, diffs, config, on_event=None):
     (if any) the seed itself inlined."""
     name = f"thread-{n}"
     _emit_step(d, on_event, name, "running")
-    profile = cw_store.role_profile(config, "analysis")
+    profile = cw_store.role_profile(config, "analysis", agent=_agent_of(d))
     if profile is None:
         _emit_step(d, on_event, name, "failed", error="no profile for role analysis")
         return None
@@ -1739,6 +1744,8 @@ def prepare_walkthrough(params, is_running=None, edit_guard=None):
             "slug": slug, "title": title, "explain": explain, "paths": paths, "diff_file": diff_file,
             "sig": sig, "sibling_of": sibling_of, "status": "building", "error": None, "remedy": None, "gate": [], "page": "partial",
         })
+        if cw_llm.valid_agent(params.get("claude")):
+            meta["claude"] = params["claude"]  # the Claude account and model picked at start
         meta["updated_at"] = now
         cw_store.write_json(d / "meta.json", meta)
 

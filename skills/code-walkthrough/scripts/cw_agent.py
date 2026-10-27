@@ -47,14 +47,14 @@ def remembered_agent(meta, config, d=None):
 
 
 def current_agent(meta, config, d=None):
-    return cw_llm.valid_agent(meta.get("agent")) or remembered_agent(meta, config, d)
+    return cw_llm.valid_agent(meta.get("claude")) or remembered_agent(meta, config, d)
 
 
 def choose_agent(d, agent):
     """Pins agent on the walkthrough and remembers it for its repo and as the default."""
     meta = cw_store.read_meta(d) or {}
     repo = (repo_name(meta, d) or "").lower()
-    cw_store.update_meta(d, lambda m: m.update({"agent": agent}))
+    cw_store.update_meta(d, lambda m: m.update({"claude": agent}))
 
     def remember(raw):
         rules = raw.setdefault("agent_rules", {})

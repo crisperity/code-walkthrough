@@ -227,8 +227,11 @@ def chat(profile, messages, tools=None, *, timeout=300, stream=False, on_chunk=N
     raise AssertionError("unreachable")  # pragma: no cover
 
 
-def claude_env():
-    return {k: v for k, v in os.environ.items() if k not in _CLAUDE_ENV_DROP}
+def claude_env(profile=None):
+    env = {k: v for k, v in os.environ.items() if k not in _CLAUDE_ENV_DROP}
+    if profile and profile.get("config_dir"):
+        env["CLAUDE_CONFIG_DIR"] = profile["config_dir"]
+    return env
 
 
 _NO_PUSH_PROTOCOLS = ("https", "http", "ssh", "git", "file", "ext")
@@ -292,7 +295,7 @@ def claude_call(profile, system, prompt, *, cwd, tools, schema=None, timeout=300
     try:
         try:
             proc = subprocess.Popen(
-                argv, cwd=cwd, env=claude_env(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                argv, cwd=cwd, env=claude_env(profile), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, text=True, start_new_session=True,
             )
         except FileNotFoundError as e:

@@ -308,7 +308,8 @@ def update_config(fn):
         write_json(path, raw, mode=0o600)
 
 
-def role_profile(config, role):
+def role_profile(config, role, agent=None):
+    """agent: a validated {config_dir, model} the user picked; it overrides a claude-code profile only."""
     roles = config.get("roles", {})
     name = roles.get(role)
     if name is None and role == "escalate":
@@ -331,6 +332,8 @@ def role_profile(config, role):
             f"profile {name!r} for role {role!r} has no {'/'.join(missing)}",
             remedy=f"fix profiles.{name} in {config_path()}",
         )
+    if agent and kind == "claude-code":
+        profile = {**profile, "model": agent["model"], "config_dir": agent["config_dir"]}
     return {**profile, "name": name}
 
 

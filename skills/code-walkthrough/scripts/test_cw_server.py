@@ -1565,7 +1565,9 @@ def test_index_page_sets_cookie_splices_nav_once_and_parses():
             for placeholder in ("<!-- CW_NAV -->", "CW_FAVICON_HREF"):
                 assert placeholder not in html
             assert 'rel="icon" href="data:image/svg+xml;base64,' in html
-            assert _live_blob(html) == {"token": daemon.token, "nav": None}
+            blob = _live_blob(html)
+            assert {k: blob[k] for k in ("token", "nav")} == {"token": daemon.token, "nav": None}
+            assert blob["agents"]["models"] == ["haiku", "sonnet", "opus"]
             _node_parses(re.findall(r"<script>(.*?)</script>", html, re.S))
             assert _request(daemon, "GET", "/walkthrough/", headers={"Cookie": f"cw_k_{daemon.port}={daemon.token}"})[0] == 200
 

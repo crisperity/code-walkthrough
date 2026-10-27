@@ -835,7 +835,11 @@ class _Handler(BaseHTTPRequestHandler):
         ok, cookie = self._check_page_auth(qs, "forbidden: open the index with `cw_mcp.py open`, which opens a link with the access key")
         if not ok or not self._check_origin():
             return
-        blob = json.dumps({"token": self.server.cw_daemon.token, "nav": None}).replace("<", "\\u003c")
+        profiles = cw_llm.claude_profiles()
+        agents = {"choices": [{"config_dir": p["dir"], "label": p["label"]} for p in profiles],
+                  "models": list(cw_llm.AGENT_MODELS),
+                  "selected": cw_llm.valid_agent((cw_store.load_config().get("agent_rules") or {}).get("last"), profiles)}
+        blob = json.dumps({"token": self.server.cw_daemon.token, "nav": None, "agents": agents}).replace("<", "\\u003c")
         html = _INDEX_HTML.replace("</head>", f"<script>window.CW_LIVE={blob};</script></head>", 1)
         self._send_html(200, _splice_nav(html, index=True), cookie)
 
@@ -1148,8 +1152,8 @@ class _Handler(BaseHTTPRequestHandler):
                                   on_event=lambda ev, data: self.server.cw_daemon.hub.emit(key, wid, ev, data))
         meta = cw_store.read_meta(d) or {}
         agent = cw_agent.current_agent(meta, cw_store.load_config(), d)
-        if agent and meta.get("agent") != agent:
-            cw_store.update_meta(d, lambda m: m.update({"agent": agent}))
+        if agent and meta.get("claude") != agent:
+            cw_store.update_meta(d, lambda m: m.update({"claude": agent}))
         qid = "q-" + secrets.token_hex(4)
         thread_id = thread_id or qid
         self.server.cw_daemon.start_ask(key, wid, d, qid, thread_id, anchor, text, anchors=anchors,
@@ -2108,6 +2112,10 @@ class _Handler(BaseHTTPRequestHandler):
                 choices = cw_index.repo_choices(parsed, cw_index.scan())
                 repo = choices[0]["repo"] if choices else parsed.get("gh_repo")
             args = cw_index.start_args(parsed, repo, fresh=body.get("fresh") is True, clone=body.get("clone") is True)
+            agent = cw_llm.valid_agent(body.get("agent"))
+            if agent:
+                args["claude"] = agent
+                cw_store.update_config(lambda raw: raw.setdefault("agent_rules", {}).update({"last": agent}))
             res = _tool_walkthrough_start(self.server.cw_daemon, args)
             result = {"url": f"/walkthrough/{res['key']}/{res['id']}/", "reused": res["reused"], "id": res["id"],
                       "key": res["key"], "status": res["status"]}
