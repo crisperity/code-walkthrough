@@ -710,3 +710,29 @@ def test_set_context_outcome_cleans_and_needs_no_reference():
     assert cw_mcp._context_payload({"context": good})["ticket"]["key"] == "AO-82"
     assert "object" in cw_mcp.check_outcome(anchor, "set_context", {"context": "AO-82"})
     assert "16384" in cw_mcp.check_outcome(anchor, "set_context", {"context": {"purpose": "y" * 17000}})
+
+
+def test_mcp_switches_to_a_newer_plugin_install_and_replays_the_request():
+    import shutil
+    skill = Path(cw_mcp.__file__).resolve().parent.parent
+    with tempfile.TemporaryDirectory() as tmp:
+        plugin = Path(tmp) / "code-walkthrough"
+        for v in ("1.0.0", "1.2.0", "1.10.0-rc"):
+            dst = plugin / v / "skills" / "code-walkthrough"
+            for sub in ("scripts", "assets", "prompts"):
+                shutil.copytree(skill / sub, dst / sub, ignore=shutil.ignore_patterns("__pycache__", "test_*"))
+        old = plugin / "1.0.0" / "skills" / "code-walkthrough" / "scripts"
+        new = plugin / "1.2.0" / "skills" / "code-walkthrough" / "scripts"
+        assert cw_mcp.newest_scripts_dir(old) == new and cw_mcp.newest_scripts_dir(new) == new
+        assert cw_mcp.newest_scripts_dir(Path(cw_mcp.__file__).resolve().parent) == Path(cw_mcp.__file__).resolve().parent
+        reqs = [{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+                {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+                {"jsonrpc": "2.0", "id": 3, "method": "ping"}]
+        proc = subprocess.run([sys.executable, str(old / "cw_mcp.py"), "mcp"], text=True, timeout=30,
+                              input="".join(json.dumps(r) + "\n" for r in reqs), capture_output=True,
+                              env={**os.environ, "CODE_WALKTHROUGH_HOME": tmp})
+        out = [json.loads(line) for line in proc.stdout.splitlines()]
+        assert [o.get("id") for o in out] == [1, None, 2, 3], proc.stderr
+        assert out[1]["method"] == "notifications/tools/list_changed"
+        assert out[0]["result"]["capabilities"]["tools"]["listChanged"] is True
+        assert out[2]["result"]["tools"] and str(new) in proc.stderr

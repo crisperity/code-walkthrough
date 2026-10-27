@@ -189,9 +189,15 @@ function makeOmni(host,o){
   host.appendChild(root);
 
   function resolved(){return (s.res&&s.resQ===s.q.trim())?s.res:null;}
+  // A link, PR number, range or commit means "start", never "search": search rows stay out of it.
+  function targetLike(q){return /^(https?:\/\/|github\.com\/|[\w.-]+\/[\w.-]+#\d+$|#?\d+$|[0-9a-f]{7,40}$)|\.\./i.test(q);}
 
   function build(){
-    var q=s.q.trim(), r=resolved(), items=[];
+    var q=s.q.trim(), r=resolved(), items=[], tl=!!q&&targetLike(q);
+    if(tl&&!r){
+      items.push({sec:'Start a walkthrough'},{note:'Checking the link…'});
+      return items;
+    }
     if(r&&r.kind){
       var ms=(r.matches||[]).slice(0,3), repos=r.repos||[];
       if(ms.length){
@@ -209,7 +215,7 @@ function makeOmni(host,o){
         items.push({note:'No local checkout of this repo is known, so there is nothing to build from.'});
       }
     }
-    if(palette){
+    if(palette&&!(tl&&r&&r.kind)){
       var rows=rowsCache, shown=[];
       if(rows){
         shown=(q?rows.filter(function(x){return rowMatches(x,q);}):recent(rows)).slice(0,8);

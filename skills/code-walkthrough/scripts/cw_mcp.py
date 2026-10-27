@@ -727,7 +727,7 @@ def _handle_initialize(req):
     requested = (req.get("params") or {}).get("protocolVersion")
     protocol = requested if requested in KNOWN_PROTOCOLS else KNOWN_PROTOCOLS[0]
     return {
-        "protocolVersion": protocol, "capabilities": {"tools": {}},
+        "protocolVersion": protocol, "capabilities": {"tools": {"listChanged": True}},
         "serverInfo": {"name": "code-walkthrough", "version": "1"},
     }
 
@@ -759,14 +759,27 @@ def _handle_tools_call(req):
 _METHODS = {"initialize": _handle_initialize, "tools/list": _handle_tools_list, "ping": lambda _req: {}}
 
 
+_INFLIGHT = [0]
+_INFLIGHT_LOCK = threading.Lock()
+
+
+def _call_and_reply(req_id, req):
+    try:
+        _write_response({"jsonrpc": "2.0", "id": req_id, "result": _handle_tools_call(req)})
+    finally:
+        with _INFLIGHT_LOCK:
+            _INFLIGHT[0] -= 1
+
+
 def _dispatch(req):
     req_id = req.get("id")
     if req_id is None:
         return
     method = req.get("method")
     if method == "tools/call":
-        threading.Thread(target=lambda: _write_response(
-            {"jsonrpc": "2.0", "id": req_id, "result": _handle_tools_call(req)}), daemon=True).start()
+        with _INFLIGHT_LOCK:
+            _INFLIGHT[0] += 1
+        threading.Thread(target=_call_and_reply, args=(req_id, req), daemon=True).start()
         return
     handler = _METHODS.get(method)
     if handler is None:
@@ -776,9 +789,61 @@ def _dispatch(req):
     _write_response({"jsonrpc": "2.0", "id": req_id, "result": handler(req)})
 
 
+def _version(name):
+    m = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", name)
+    return tuple(int(x) for x in m.groups()) if m else None
+
+
+def newest_scripts_dir(scripts_dir=SCRIPTS_DIR):
+    """A plugin update installs beside the running copy (<plugin>/<version>/skills/code-walkthrough/
+    scripts). Returns the scripts dir of a strictly newer install, else scripts_dir. A dev checkout
+    has no version dir and never moves."""
+    ver_dir = scripts_dir.parents[2]
+    mine = _version(ver_dir.name)
+    if mine is None:
+        return scripts_dir
+    rel = scripts_dir.relative_to(ver_dir)
+    best = (mine, scripts_dir)
+    try:
+        for d in ver_dir.parent.iterdir():
+            v = _version(d.name)
+            if v and v > best[0] and (d / rel / "cw_mcp.py").is_file():
+                best = (v, d / rel)
+    except OSError:
+        return scripts_dir
+    return best[1]
+
+
+def _upgrade_exec(pending):
+    """Replace this process with the newest installed copy, handing over the unread stdin bytes
+    (starting with the request being handled). Only called with no tool call in flight, so no
+    reply is lost; the new process tells the client to reload the tool list."""
+    newer = newest_scripts_dir()
+    if newer == SCRIPTS_DIR:
+        return
+    with _INFLIGHT_LOCK:
+        if _INFLIGHT[0]:
+            return
+    _log(f"switching to the newer install at {newer}")
+    os.environ["CW_MCP_REPLAY"] = pending.hex()
+    sys.stdout.flush()
+    os.execv(sys.executable, [sys.executable, str(newer / "cw_mcp.py"), "mcp"])
+
+
 def cmd_mcp():
-    for line in sys.stdin:
-        line = line.strip()
+    # Raw fd reads, not sys.stdin: a buffered reader would swallow requests that an upgrade exec must hand on.
+    buf = bytes.fromhex(os.environ.pop("CW_MCP_REPLAY", ""))
+    if buf:
+        _write_response({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
+    last_check = 0.0
+    while True:
+        while b"\n" not in buf:
+            chunk = os.read(0, 65536)
+            if not chunk:
+                return 0
+            buf += chunk
+        raw, buf = buf.split(b"\n", 1)
+        line = raw.decode("utf-8", "replace").strip()
         if not line:
             continue
         try:
@@ -786,8 +851,10 @@ def cmd_mcp():
         except ValueError:
             _log(f"bad json-rpc line: {line!r}")
             continue
+        if req.get("method") in ("tools/call", "tools/list") and time.monotonic() - last_check > 10:
+            last_check = time.monotonic()
+            _upgrade_exec(raw + b"\n" + buf)
         _dispatch(req)
-    return 0
 
 
 def _log_file(message):
