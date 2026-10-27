@@ -195,8 +195,12 @@ def _agent_payload(meta, d):
         value = cw_agent.repo_name(meta, d)
     elif by == "org":
         value = (cw_agent.repo_name(meta, d) or "").split("/", 1)[0]
+    profiles = cw_llm.claude_profiles()
     return {"full": refusal is None, "own_pr": meta.get("own_pr"), "stale": cw_agent.agent_stale(meta),
-            "full_off": full_off, "trusted": {"by": by, "value": value} if by else None}
+            "full_off": full_off, "trusted": {"by": by, "value": value} if by else None,
+            "choices": [{"config_dir": p["dir"], "label": p["label"]} for p in profiles],
+            "models": list(cw_llm.AGENT_MODELS),
+            "selected": cw_agent.current_agent(meta, config, d)}
 
 
 def _live_payload(key, wid, meta, d, token, port):
@@ -589,6 +593,7 @@ _QA_RE = re.compile(r"^/api/walkthrough/([^/]+)/([^/]+)/qa$")
 _POST_PREVIEW_RE = re.compile(r"^/api/walkthrough/([^/]+)/([^/]+)/post/preview$")
 _POST_RE = re.compile(r"^/api/walkthrough/([^/]+)/([^/]+)/post$")
 _TRIAGE_RE = re.compile(r"^/api/walkthrough/([^/]+)/([^/]+)/triage$")
+_AGENT_RE = re.compile(r"^/api/walkthrough/([^/]+)/([^/]+)/agent$")
 _TICKET_RE = re.compile(r"^/api/walkthrough/([^/]+)/([^/]+)/ticket$")
 _RESOLVE_THREAD_RE = re.compile(r"^/api/walkthrough/([^/]+)/([^/]+)/resolve-thread$")
 _TRUST_RE = re.compile(r"^/api/walkthrough/([^/]+)/([^/]+)/trust$")
@@ -801,6 +806,9 @@ class _Handler(BaseHTTPRequestHandler):
         m = _TICKET_RE.match(path)
         if m:
             return self._tracked(lambda: self._route_ticket(m.group(1), m.group(2)))
+        m = _AGENT_RE.match(path)
+        if m:
+            return self._tracked(lambda: self._route_agent(m.group(1), m.group(2)))
         m = _TRUST_RE.match(path)
         if m:
             return self._tracked(lambda: self._route_trust(m.group(1), m.group(2)))
@@ -1138,6 +1146,10 @@ class _Handler(BaseHTTPRequestHandler):
         if thread_id is not None and thread["resolved"]:
             cw_ask.append_resolve(d, thread_id, False,
                                   on_event=lambda ev, data: self.server.cw_daemon.hub.emit(key, wid, ev, data))
+        meta = cw_store.read_meta(d) or {}
+        agent = cw_agent.current_agent(meta, cw_store.load_config(), d)
+        if agent and meta.get("agent") != agent:
+            cw_store.update_meta(d, lambda m: m.update({"agent": agent}))
         qid = "q-" + secrets.token_hex(4)
         thread_id = thread_id or qid
         self.server.cw_daemon.start_ask(key, wid, d, qid, thread_id, anchor, text, anchors=anchors,
@@ -1236,6 +1248,29 @@ class _Handler(BaseHTTPRequestHandler):
             emit = lambda ev, data: daemon.hub.emit(key, wid, ev, data)  # noqa: E731
             result = cw_ask.hand_ticket(d, value, emit)
         self._send_json(200, result)
+
+    def _route_agent(self, key, wid):
+        if not self._check_host() or not self._check_token_header() or not self._check_origin():
+            return
+        raw, too_big = self._read_body()
+        if too_big:
+            return
+        d = self._resolve_dir(key, wid, json_errors=True)
+        if d is None:
+            return
+        try:
+            payload = json.loads(raw) if raw else {}
+        except ValueError:
+            payload = None
+        agent = cw_llm.valid_agent(payload)
+        if agent is None:
+            self._send_json(400, {"error": "unknown agent",
+                                  "remedy": "pick a detected Claude profile and haiku, sonnet or opus"})
+            return
+        if self._sibling_refusal(d):
+            return
+        cw_agent.choose_agent(d, agent)
+        self._send_json(200, {"selected": agent})
 
     def _route_triage(self, key, wid):
         if not self._check_host() or not self._check_token_header() or not self._check_origin():

@@ -68,4 +68,4 @@ def _unwrapped_full_turns(request, monkeypatch):
     cw_llm = sys.modules.get("cw_llm")
     if cw_llm is not None and request.path.name != "test_cw_llm.py":
         monkeypatch.setattr(cw_llm, "confinement_available", lambda: True)
-        monkeypatch.setattr(cw_llm, "confine_prefix", lambda *a: [])
+        monkeypatch.setattr(cw_llm, "confine_prefix", lambda *a, **k: [])

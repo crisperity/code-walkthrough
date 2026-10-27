@@ -376,6 +376,31 @@ def _secret_files():
     return sorted({os.path.realpath(p) for p in paths if os.path.exists(p)})
 
 
+AGENT_MODELS = ("haiku", "sonnet", "opus")
+
+
+def claude_profiles(home=None):
+    """Claude Code config dirs on this machine: ~/.claude* directories that hold settings or
+    credentials, plus the daemon's own CLAUDE_CONFIG_DIR. [{dir, label}], default profile first."""
+    home = Path(home or Path.home())
+    found = {home / ".claude"} if (home / ".claude").is_dir() else set()
+    found |= {p for p in home.glob(".claude-*") if p.is_dir()}
+    if os.environ.get("CLAUDE_CONFIG_DIR"):
+        found.add(Path(os.environ["CLAUDE_CONFIG_DIR"]))
+    usable = [p for p in found if (p / "settings.json").exists() or (p / ".credentials.json").exists()]
+    return [{"dir": str(p), "label": p.name.removeprefix(".claude").lstrip("-") or "default"}
+            for p in sorted(usable, key=lambda p: (p.name != ".claude", p.name))]
+
+
+def valid_agent(agent, profiles=None):
+    """{config_dir, model} when agent names a detected profile and a known model, else None.
+    The dir ends up in an env var and a bwrap bind, so it is never taken from the request as is."""
+    if not isinstance(agent, dict) or agent.get("model") not in AGENT_MODELS:
+        return None
+    dirs = {p["dir"] for p in (claude_profiles() if profiles is None else profiles)}
+    return {"config_dir": agent["config_dir"], "model": agent["model"]} if agent.get("config_dir") in dirs else None
+
+
 def claude_dir(home, config_dir=None):
     # The Claude Code config dir an agent run uses: the repo's configured one, else CLAUDE_CONFIG_DIR, else ~/.claude.
     return Path(config_dir or os.environ.get("CLAUDE_CONFIG_DIR") or Path(home) / ".claude")
@@ -383,7 +408,8 @@ def claude_dir(home, config_dir=None):
 
 def project_dir(home, cwd, config_dir=None):
     # Claude Code names a cwd's state dir after the path with every non-alphanumeric character replaced by '-'.
-    return claude_dir(home, config_dir) / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
+    # Resolved: a second profile often symlinks projects/ to the first, and bwrap cannot create a mount point through a symlink.
+    return (claude_dir(home, config_dir) / "projects").resolve() / re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
 
 
 def confine_prefix(worktree, repo_root, home, turns_dir, sockets=None, exists=os.path.exists,
@@ -419,7 +445,7 @@ def confine_prefix(worktree, repo_root, home, turns_dir, sockets=None, exists=os
         "--bind", worktree, worktree, "--bind", turns_dir, turns_dir,
     ]
     cdir = claude_dir(home, config_dir)
-    writable = [str(project_dir(home, worktree, config_dir))] + [str(cdir / rel) for rel in (
+    writable = [str(project_dir(home, worktree, config_dir))] + [str((cdir / rel).resolve()) for rel in (
         "session-env", "sessions", ".credentials.json")] + [f"{home}/.local/share/rtk"]
     for path in writable:
         prefix += ["--bind-try", path, path]

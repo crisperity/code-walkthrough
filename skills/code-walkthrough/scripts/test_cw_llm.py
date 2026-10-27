@@ -629,6 +629,20 @@ def test_claude_state_follows_claude_config_dir(monkeypatch):
     assert "/home/u/.claude-private/sessions" in argv and "/home/u/.claude/sessions" not in argv
 
 
+def test_claude_profiles_and_valid_agent(tmp_path, monkeypatch):
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    for name, marker in ((".claude", "settings.json"), (".claude-private", ".credentials.json"), (".claude-empty", "x")):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / marker).write_text("{}")
+    profiles = cw_llm.claude_profiles(tmp_path)
+    assert [p["label"] for p in profiles] == ["default", "private"]
+    ok = {"config_dir": str(tmp_path / ".claude-private"), "model": "haiku"}
+    assert cw_llm.valid_agent(ok, profiles) == ok
+    assert cw_llm.valid_agent({**ok, "config_dir": "/etc"}, profiles) is None
+    assert cw_llm.valid_agent({**ok, "model": "gpt"}, profiles) is None
+    assert cw_llm.valid_agent(None, profiles) is None
+
+
 def test_confine_prefix_masks_only_existing_paths():
     argv = cw_llm.confine_prefix("/w/d/agent", "/r", "/home/u", "/w/d/turns", sockets=[],
                                  exists=lambda p: p == "/home/u/.ssh")

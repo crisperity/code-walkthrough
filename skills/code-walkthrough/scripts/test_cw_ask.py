@@ -1393,7 +1393,7 @@ def test_unwrapped_full_turn_does_not_create_the_project_dir(monkeypatch, tmp_pa
 
     monkeypatch.setattr(cw_llm, "confinement_available", lambda: True)
     monkeypatch.setattr(cw_llm, "git_common_dir", lambda wt: tmp_path / "repo.git")
-    monkeypatch.setattr(cw_llm, "confine_prefix", lambda *a: [])
+    monkeypatch.setattr(cw_llm, "confine_prefix", lambda *a, **k: [])
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
     monkeypatch.setattr(cw_ask, "_stream_once", lambda *a, **k: 1 / 0)
     with cw_testlib.temp_home() as home:

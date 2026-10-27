@@ -51,8 +51,9 @@ def test_live_payload_agent_defaults_off(tmp_path, monkeypatch):
         "reason": "Full access is off for this walkthrough", "fixable": "trust", "repo": "a/b", "org": "a",
         "remedy": "Trust this repo from the Threads panel, or add it to trust.repos in config.json"}
     live = cw_server._live_payload("k", "w", {"gh_repo": "a/b", "own_pr": True}, tmp_path, "tok", 1)
-    assert live["agent"] == {"full": True, "own_pr": True, "stale": False, "full_off": None,
-                             "trusted": {"by": "own_pr", "value": None}}
+    assert {k: live["agent"][k] for k in ("full", "own_pr", "stale", "full_off", "trusted")} == {
+        "full": True, "own_pr": True, "stale": False, "full_off": None, "trusted": {"by": "own_pr", "value": None}}
+    assert live["agent"]["models"] == ["haiku", "sonnet", "opus"]
     monkeypatch.setattr(cw_server.cw_llm, "confinement_available", lambda: False)
     live = cw_server._live_payload("k", "w", {"gh_repo": "a/b", "own_pr": True}, tmp_path, "tok", 1)
     assert live["agent"]["full"] is False and live["agent"]["full_off"]["fixable"] is None
@@ -647,3 +648,20 @@ def test_a_dirty_worktree_at_the_head_survives_a_refresh():
         assert not cw_agent.has_edits(d, old) and cw_agent.is_dirty(d)
         assert cw_run._full_clean(d, old, repo) == {"agent": old["agent"]}
         assert (wt / "a.py").read_text() == "x = 3\n"
+
+
+def test_chosen_agent_is_remembered_for_the_repo_and_as_default(tmp_path, monkeypatch):
+    monkeypatch.setenv("CODE_WALKTHROUGH_HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    monkeypatch.setattr(cw_agent.cw_llm, "claude_profiles", lambda home=None: [{"dir": "/c/work", "label": "work"}])
+    d = tmp_path / "w"
+    d.mkdir()
+    cw_store.write_json(d / "meta.json", {"gh_repo": "Acme/Api"})
+    agent = {"config_dir": "/c/work", "model": "haiku"}
+    cw_agent.choose_agent(d, agent)
+    assert cw_store.read_meta(d)["agent"] == agent
+    config = cw_store.load_config()
+    assert config["agent_rules"] == {"last": agent, "repos": {"acme/api": agent}}
+    assert cw_agent.current_agent({"gh_repo": "acme/api"}, config) == agent        # same repo, new walkthrough
+    assert cw_agent.current_agent({"gh_repo": "other/repo"}, config) == agent      # falls back to the last choice
+    assert cw_agent.current_agent({"gh_repo": "acme/api", "agent": {"config_dir": "/x", "model": "haiku"}}, config) == agent  # stale pin ignored

@@ -1081,7 +1081,10 @@ def _claude_turn(d, record, profile, config, anchor, question, on_event, live, o
     if full:
         system += "\n\n" + (SKILL_DIR / "prompts" / "agent.md").read_text()
     mcp_config = cw_mcp.outcome_mcp_config(d, qid, mode)
-    cdir = None
+    agent = cw_llm.valid_agent((cw_store.read_meta(d) or {}).get("agent"))
+    cdir = agent and agent["config_dir"]
+    if agent:
+        profile = {**profile, "model": agent["model"]}
     prior = _thread_session(d, thread_id, mode)
     write_turn_anchor(d, qid, thread_id, anchor, question, record["source"], anchors=anchors, mode=mode)
     if full and not cw_llm.confinement_available():

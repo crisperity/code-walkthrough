@@ -5938,13 +5938,37 @@ if(window.CW_LIVE){
     }
     paintAccess(window.CW_LIVE.agent);
     window.__cwOnAgent=paintAccess;
+    // Which Claude account and model answer in Full turns; remembered for the repo and as the default.
+    const pAgent=mk('div','cw-access'); pAgent.setAttribute('aria-label','Agent');
+    function paintAgent(a){
+      const choices=(a&&a.choices)||[];
+      pAgent.hidden=!choices.length;
+      if(!choices.length) return;
+      const sel=a.selected||{};
+      const acct=mk('select'), model=mk('select');
+      acct.setAttribute('aria-label','Claude account'); model.setAttribute('aria-label','Model');
+      choices.forEach(c=>{ const o=mk('option',null,c.label); o.value=c.config_dir; acct.append(o); });
+      (a.models||[]).forEach(m=>{ const o=mk('option',null,m); o.value=m; model.append(o); });
+      acct.value=sel.config_dir||choices[0].config_dir; model.value=sel.model||'sonnet';
+      const note=mk('span');
+      const save=()=>{
+        note.textContent='Saving…';
+        postJson('/agent',{config_dir:acct.value,model:model.value})
+          .then(({ok,body})=>{ note.textContent=ok&&!body.error?'Saved for this repo':(body.error||'Request failed'); })
+          .catch(()=>{ note.textContent='Request failed -- check the daemon is still running.'; });
+      };
+      acct.addEventListener('change',save); model.addEventListener('change',save);
+      pAgent.replaceChildren(mk('span',null,'Agent:'),acct,model,note);
+    }
+    paintAgent(window.CW_LIVE.agent);
+    window.__cwOnAgent=a=>{ paintAccess(a); paintAgent(a); };
     window.__cwOpenThread=tid=>openPanel({thread:tid});
 
     const pThread=mk('div'); pThread.id='cw-panel-thread'; pThread.hidden=true;
     const pBody=mk('div'); pBody.id='cw-panel-body';
     const pCompose=mk('div'); pCompose.id='cw-panel-compose';
     pThread.append(pBody,pCompose);
-    panel.append(grab,pHead,pAccess,pList,pThread);
+    panel.append(grab,pHead,pAccess,pAgent,pList,pThread);
     $('cw-dock').after(panel);
 
     const resizer=mk('div'); resizer.id='cw-panel-resize'; resizer.tabIndex=0;
