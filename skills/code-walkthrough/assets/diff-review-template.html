@@ -790,7 +790,8 @@
     background:var(--purple)}
   .cw-ref-dot-btn:hover::after{box-shadow:0 0 0 3px color-mix(in srgb,var(--purple) 30%,transparent)}
   .cw-ref-dot-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px;border-radius:50%}
-  .cw-ref-dot:not(.dline){box-shadow:-6px 0 0 -3px var(--purple)}
+  .cw-ref-dot:not(.dline){position:relative}
+  .cw-ref-dot:not(.dline)>.cw-ref-dot-btn{left:-20px;top:.75em}
   #cw-toast{position:fixed;left:50%;transform:translateX(-50%);bottom:64px;z-index:52;
     display:flex;align-items:center;gap:10px;box-sizing:border-box;width:max-content;max-width:min(420px,calc(100vw - 32px));
     padding:8px 12px;border:1px solid var(--purple);border-radius:8px;background:var(--panel2);color:var(--text);
@@ -926,13 +927,11 @@
     background:color-mix(in srgb,var(--purple) 5%,transparent);
     white-space:normal;overflow-wrap:anywhere}
   .cw-pageedit.cw-kept{position:relative;padding:0;border:0;border-radius:0;background:none}
-  .cw-pageedit.cw-kept::before{content:"";position:absolute;left:-12px;top:6px;bottom:6px;width:3px;border-radius:2px;
-    background:color-mix(in srgb,var(--purple) 45%,transparent)}
   .cw-pageedit-bar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin-bottom:10px;
     color:var(--muted);font:var(--fs-xs)/1.4 system-ui,sans-serif}
   .cw-pageedit-bar b{color:var(--text);font-weight:600}
   .cw-pageedit-bar .cw-grow{flex:1}
-  .cw-kept .cw-pageedit-bar{margin:6px 0 0;opacity:.55;transition:opacity .15s}
+  .cw-kept .cw-pageedit-bar{margin:4px 0 0;opacity:0;transition:opacity .15s}
   .cw-kept:hover .cw-pageedit-bar,.cw-kept:focus-within .cw-pageedit-bar{opacity:1}
   .cw-pageedit .cw-vis svg{max-width:100%}
   .cw-pageedit-label{margin:0 0 4px;color:var(--muted);font:var(--fs-xs)/1.4 system-ui,sans-serif}
@@ -5780,8 +5779,7 @@ if(window.CW_LIVE){
       dotOf=next;
       for(const [el,tid] of next){
         el.classList.add('cw-ref-dot'); el.dataset.cwSent='1';
-        if(!el.classList.contains('dline')) continue;
-        let b=el.querySelector('.cw-ref-dot-btn');
+        let b=el.querySelector(':scope>.cw-ref-dot-btn');
         if(!b){
           b=document.createElement('button'); b.type='button'; b.className='cw-ref-dot-btn'; b.tabIndex=-1;
           b.addEventListener('mousedown',e=>e.preventDefault());
