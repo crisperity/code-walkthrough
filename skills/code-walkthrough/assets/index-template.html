@@ -58,10 +58,10 @@
   .btn.primary kbd{border-color:currentColor;opacity:.6}
   .btn:disabled{opacity:.6;cursor:default}
   .titlerow .btn{margin-left:auto}
+  .titlerow .cwa-chip{margin-left:auto}
+  .titlerow .cwa-chip+.btn{margin-left:0}
   .titlerow .short{display:none}
   #omni{margin-top:20px}
-  .agentpick{margin-top:12px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:13px;color:var(--muted)}
-  .agentpick select{font:inherit;color:var(--text);background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:3px 6px}
 
   .tabrow{display:flex;gap:24px;margin-top:20px;border-bottom:1px solid var(--rule);font-size:14px}
   .tabs{display:flex;gap:24px;overflow-x:auto;white-space:nowrap;min-width:0;scrollbar-width:none}
@@ -184,7 +184,6 @@
       </div>
       <button class="btn primary" id="new" type="button"><span class="long">New walkthrough</span><span class="short">New</span> <kbd>N</kbd></button>
     </div>
-    <div id="agent-pick" class="agentpick" hidden></div>
     <div id="omni"></div>
     <div class="tabrow">
       <div class="tabs" id="tabs" role="tablist"></div>
@@ -545,17 +544,27 @@ $('body').addEventListener('dblclick',function(e){openRow(rowOf(e),false);});
 $('sort').addEventListener('change',function(){st.sort=this.value;render();});
 $('repo').addEventListener('change',function(){st.repo=this.value;render();});
 (function agentPick(){
-  var a=LIVE.agents, box=$('agent-pick');
-  if(!a||!a.choices||!a.choices.length) return;
-  var acct=h('select'), model=h('select'), sel=a.selected||{};
-  acct.setAttribute('aria-label','Claude account'); model.setAttribute('aria-label','Model');
-  a.choices.forEach(function(c){var o=h('option',null,c.label);o.value=c.config_dir;acct.appendChild(o);});
-  a.models.forEach(function(m){var o=h('option',null,m);o.value=m;model.appendChild(o);});
-  acct.value=sel.config_dir||a.choices[0].config_dir; model.value=sel.model||'sonnet';
-  function pick(){window.CW_AGENT_PICK={config_dir:acct.value,model:model.value};}
-  acct.addEventListener('change',pick); model.addEventListener('change',pick); pick();
-  box.append(h('span',null,'Agent for new walkthroughs:'),acct,model);
-  box.hidden=false;
+  var a=LIVE.agents;
+  if(!a||!window.CWAgent) return;
+  function setPick(){ var v=(a.setups||[]).filter(function(x){return !x.hidden;});
+    var sel=a.selected&&v.some(function(x){return x.config_dir===a.selected.config_dir;})?a.selected:null;
+    window.CW_AGENT_PICK=sel||(v[0]?{config_dir:v[0].config_dir,model:(a.selected||{}).model||'sonnet'}:null); }
+  setPick();
+  // On the index the pick only travels with the next start; the server remembers it as the default then.
+  var c=window.CWAgent.chip(a,{onPick:function(agent){ a.selected=agent; window.CW_AGENT_PICK=agent; }});
+  $('new').before(c.el);
+  function post(body){
+    return fetch('/api/setups',{method:'POST',credentials:'same-origin',
+      headers:{'Content-Type':'application/json','X-CW-Token':LIVE.token||''},body:JSON.stringify(body)})
+      .then(function(r){return r.json();})
+      .then(function(d){ if(!d||!d.ok) throw new Error((d&&d.error||'Could not save')+(d&&d.remedy?'. '+d.remedy:'')); return d.agents; });
+  }
+  function showSetup(){
+    if(document.getElementById('cwa-setup')) return;
+    $('omni').before(window.CWAgent.setupCard(a,post,function(next){ next.selected=a.selected; a=next; setPick(); c.update(a); }));
+  }
+  if(a.setup_due||location.hash==='#setups') showSetup();
+  window.addEventListener('hashchange',function(){ if(location.hash==='#setups') showSetup(); });
 })();
 $('new').addEventListener('click',function(){if(omni) omni.focus();});
 

@@ -4442,6 +4442,17 @@ if(window.CW_LIVE){
     }
 
     const turnRefs=r=>(r.anchors||[r.anchor]).filter(a=>a&&a.kind!=='free');
+    // Re-asks r's question in thread t on another Claude install (the missing-skill hint).
+    function retryOn(t,r,alt){
+      t.msg.textContent='';
+      pickAgent({config_dir:alt,model:r.model||'sonnet'},false)
+        .then(()=>postJson('/comment',{anchors:turnRefs(r),text:r.comment||r.question||'',thread_id:t.id}))
+        .then(res=>{
+          if(res&&!res.ok){ t.msg.textContent=res.body.error||'Request failed'; return; }
+          if(agentChip&&agentData){ agentData.selected={config_dir:alt,model:r.model||'sonnet'}; agentChip.update(agentData); }
+        })
+        .catch(e=>{ t.msg.textContent=e.message||'Request failed -- check the daemon is still running.'; });
+    }
     function retryBtn(t,r){
       const b=mkBtn('Retry','cw-retry fb-ghost');
       b.addEventListener('click',()=>{
@@ -5144,6 +5155,8 @@ if(window.CW_LIVE){
       }
       if(r.mode==='full') q.append(mk('span','cw-mode-badge','Full'));
       d.append(q);
+      const by=window.CWAgent&&r.status!=='pending'?window.CWAgent.turnBadge(r,isLast?alt=>retryOn(t,r,alt):null):null;
+      if(by) d.append(by);
       if(r.status==='pending'){
         const st=streams.get(r.qid)||{};
         const live=mk('div','cw-turn-a cw-md cw-streaming');
@@ -5938,29 +5951,22 @@ if(window.CW_LIVE){
     }
     paintAccess(window.CW_LIVE.agent);
     window.__cwOnAgent=paintAccess;
-    // Which Claude account and model answer in Full turns; remembered for the repo and as the default.
-    const pAgent=mk('div','cw-access'); pAgent.setAttribute('aria-label','Agent');
-    function paintAgent(a){
-      const choices=(a&&a.choices)||[];
-      pAgent.hidden=!choices.length;
-      if(!choices.length) return;
-      const sel=a.selected||{};
-      const acct=mk('select'), model=mk('select');
-      acct.setAttribute('aria-label','Claude account'); model.setAttribute('aria-label','Model');
-      choices.forEach(c=>{ const o=mk('option',null,c.label); o.value=c.config_dir; acct.append(o); });
-      (a.models||[]).forEach(m=>{ const o=mk('option',null,m); o.value=m; model.append(o); });
-      acct.value=sel.config_dir||choices[0].config_dir; model.value=sel.model||'sonnet';
-      const note=mk('span');
-      const save=()=>{
-        note.textContent='Saving…';
-        postJson('/agent',{config_dir:acct.value,model:model.value})
-          .then(({ok,body})=>{ note.textContent=ok&&!body.error?'Saved for this repo':(body.error||'Request failed'); })
-          .catch(()=>{ note.textContent='Request failed -- check the daemon is still running.'; });
-      };
-      acct.addEventListener('change',save); model.addEventListener('change',save);
-      pAgent.replaceChildren(mk('span',null,'Agent:'),acct,model,note);
+    // Which Claude account and model answer here. cw-agent is spliced after this script, so mount on DOMContentLoaded.
+    let agentChip=null, agentData=null;
+    function pickAgent(agent,remember){
+      return postJson('/agent',{...agent,remember}).then(({ok,body})=>{
+        if(!ok||body.error) throw new Error((body.error||'Request failed')+(body.remedy?' ('+body.remedy+')':''));
+      });
     }
-    paintAgent(window.CW_LIVE.agent);
+    function paintAgent(a){
+      const p=a&&a.picker;
+      if(!p||!window.CWAgent) return;
+      agentData=p;
+      if(agentChip) agentChip.update(p);
+      else { agentChip=window.CWAgent.chip(p,{small:true,remember:true,onPick:pickAgent}); pHead.insertBefore(agentChip.el,pClose); }
+    }
+    if(window.CWAgent) paintAgent(window.CW_LIVE.agent);
+    else document.addEventListener('DOMContentLoaded',()=>{ paintAgent(window.CW_LIVE.agent); for(const t of threads.values()) renderThread(t); });
     window.__cwOnAgent=a=>{ paintAccess(a); paintAgent(a); };
     window.__cwOpenThread=tid=>openPanel({thread:tid});
 
@@ -5968,7 +5974,7 @@ if(window.CW_LIVE){
     const pBody=mk('div'); pBody.id='cw-panel-body';
     const pCompose=mk('div'); pCompose.id='cw-panel-compose';
     pThread.append(pBody,pCompose);
-    panel.append(grab,pHead,pAccess,pAgent,pList,pThread);
+    panel.append(grab,pHead,pAccess,pList,pThread);
     $('cw-dock').after(panel);
 
     const resizer=mk('div'); resizer.id='cw-panel-resize'; resizer.tabIndex=0;

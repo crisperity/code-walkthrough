@@ -53,7 +53,7 @@ def test_live_payload_agent_defaults_off(tmp_path, monkeypatch):
     live = cw_server._live_payload("k", "w", {"gh_repo": "a/b", "own_pr": True}, tmp_path, "tok", 1)
     assert {k: live["agent"][k] for k in ("full", "own_pr", "stale", "full_off", "trusted")} == {
         "full": True, "own_pr": True, "stale": False, "full_off": None, "trusted": {"by": "own_pr", "value": None}}
-    assert live["agent"]["models"] == ["haiku", "sonnet", "opus"]
+    assert live["agent"]["picker"]["models"] == ["haiku", "sonnet", "opus"] and live["agent"]["picker"]["repo"] == "a/b"
     monkeypatch.setattr(cw_server.cw_llm, "confinement_available", lambda: False)
     live = cw_server._live_payload("k", "w", {"gh_repo": "a/b", "own_pr": True}, tmp_path, "tok", 1)
     assert live["agent"]["full"] is False and live["agent"]["full_off"]["fixable"] is None

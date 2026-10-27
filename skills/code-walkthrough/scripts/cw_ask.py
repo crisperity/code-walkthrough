@@ -1220,6 +1220,11 @@ def answer(d, qid, anchor, question, on_event=None, thread_id=None, live=None, s
         else:
             record["profile"] = profile.get("name")
             record["model"] = profile.get("model")
+            if profile.get("kind") == "claude-code":
+                cdir = profile.get("config_dir") or str(cw_llm.claude_dir(Path.home()).resolve())
+                record["setup"] = cw_llm.setup_label(cdir, config)
+                if mode == "full":
+                    record["missing_skill"] = cw_llm.missing_skill(question, cdir, config)
             usage_hook = cw_run._make_on_usage(d, "thread", on_event, config)
 
             def on_usage(usage):

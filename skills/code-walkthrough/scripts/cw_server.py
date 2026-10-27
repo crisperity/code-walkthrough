@@ -72,7 +72,7 @@ _PWA_ASSETS = {
 
 _NAV_PLACEHOLDER = "<!-- CW_NAV -->"
 _FAVICON_PLACEHOLDER = "CW_FAVICON_HREF"
-_NAV_HTML = (_ASSETS / "cw-nav.html").read_text()
+_NAV_HTML = (_ASSETS / "cw-nav.html").read_text() + (_ASSETS / "cw-agent.html").read_text()
 _INDEX_HTML = (_ASSETS / "index-template.html").read_text()
 _FAVICON_HREF = "data:image/svg+xml;base64," + base64.b64encode((_ASSETS / "icon.svg").read_bytes()).decode()
 
@@ -195,12 +195,10 @@ def _agent_payload(meta, d):
         value = cw_agent.repo_name(meta, d)
     elif by == "org":
         value = (cw_agent.repo_name(meta, d) or "").split("/", 1)[0]
-    profiles = cw_llm.claude_profiles()
     return {"full": refusal is None, "own_pr": meta.get("own_pr"), "stale": cw_agent.agent_stale(meta),
             "full_off": full_off, "trusted": {"by": by, "value": value} if by else None,
-            "choices": [{"config_dir": p["dir"], "label": p["label"]} for p in profiles],
-            "models": list(cw_llm.AGENT_MODELS),
-            "selected": cw_agent.current_agent(meta, config, d)}
+            "picker": {**cw_llm.agents_payload(config, cw_agent.current_agent(meta, config, d)),
+                       "repo": cw_agent.repo_name(meta, d)}}
 
 
 def _live_payload(key, wid, meta, d, token, port):
@@ -593,6 +591,7 @@ _QA_RE = re.compile(r"^/api/walkthrough/([^/]+)/([^/]+)/qa$")
 _POST_PREVIEW_RE = re.compile(r"^/api/walkthrough/([^/]+)/([^/]+)/post/preview$")
 _POST_RE = re.compile(r"^/api/walkthrough/([^/]+)/([^/]+)/post$")
 _TRIAGE_RE = re.compile(r"^/api/walkthrough/([^/]+)/([^/]+)/triage$")
+_SETUPS_PATH = "/api/setups"
 _AGENT_RE = re.compile(r"^/api/walkthrough/([^/]+)/([^/]+)/agent$")
 _TICKET_RE = re.compile(r"^/api/walkthrough/([^/]+)/([^/]+)/ticket$")
 _RESOLVE_THREAD_RE = re.compile(r"^/api/walkthrough/([^/]+)/([^/]+)/resolve-thread$")
@@ -776,6 +775,8 @@ class _Handler(BaseHTTPRequestHandler):
             return self._tracked(self._route_shutdown)
         if path == "/api/walkthroughs/start":
             return self._tracked(self._route_walkthroughs_start)
+        if path == _SETUPS_PATH:
+            return self._tracked(self._route_setups)
         m = _ASK_RE.match(path)
         if m:
             return self._tracked(lambda: self._route_comment(m.group(1), m.group(2), "question"))
@@ -835,10 +836,8 @@ class _Handler(BaseHTTPRequestHandler):
         ok, cookie = self._check_page_auth(qs, "forbidden: open the index with `cw_mcp.py open`, which opens a link with the access key")
         if not ok or not self._check_origin():
             return
-        profiles = cw_llm.claude_profiles()
-        agents = {"choices": [{"config_dir": p["dir"], "label": p["label"]} for p in profiles],
-                  "models": list(cw_llm.AGENT_MODELS),
-                  "selected": cw_llm.valid_agent((cw_store.load_config().get("agent_rules") or {}).get("last"), profiles)}
+        config = cw_store.load_config()
+        agents = cw_llm.agents_payload(config, cw_llm.valid_agent((config.get("agent_rules") or {}).get("last")))
         blob = json.dumps({"token": self.server.cw_daemon.token, "nav": None, "agents": agents}).replace("<", "\\u003c")
         html = _INDEX_HTML.replace("</head>", f"<script>window.CW_LIVE={blob};</script></head>", 1)
         self._send_html(200, _splice_nav(html, index=True), cookie)
@@ -1273,7 +1272,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if self._sibling_refusal(d):
             return
-        cw_agent.choose_agent(d, agent)
+        cw_agent.choose_agent(d, agent, remember=payload.get("remember", True) is not False)
         self._send_json(200, {"selected": agent})
 
     def _route_triage(self, key, wid):
@@ -2122,6 +2121,50 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True, "result": result})
         except cw_store.CWError as e:
             self._send_json(200, {"ok": False, "error": str(e), "remedy": e.remedy})
+
+    def _route_setups(self):
+        """Names, hides or adds Claude Code installs: {setups: {dir: {name, hidden}}, add: dir, seen: bool}."""
+        if not self._check_host() or not self._check_token_header() or not self._check_origin():
+            return
+        raw, too_big = self._read_body()
+        if too_big:
+            return
+        try:
+            body = json.loads(raw) if raw else {}
+        except ValueError:
+            body = None
+        if not isinstance(body, dict) or not isinstance(body.get("setups", {}), dict):
+            self._send_json(400, {"error": "bad json"})
+            return
+        known = {p["dir"] for p in cw_llm.claude_profiles(include_hidden=True)}
+        add = body.get("add")
+        if add is not None:
+            add = str(Path(os.path.expanduser(add)).resolve()) if isinstance(add, str) and add.strip() else ""
+            if not add or not cw_llm._is_setup(add):
+                self._send_json(400, {"error": "not a Claude Code folder",
+                                      "remedy": "pick the folder that holds settings.json or .credentials.json"})
+                return
+        edits = {}
+        for d, v in body.get("setups", {}).items():
+            name = v.get("name") if isinstance(v, dict) else None
+            if d not in known or (name is not None and (not isinstance(name, str) or len(name) > 40)):
+                self._send_json(400, {"error": "unknown setup or bad name", "remedy": "names are up to 40 characters"})
+                return
+            edits[d] = {"name": (name or "").strip() or None, "hidden": bool(v.get("hidden"))}
+
+        def apply(raw_cfg):
+            setups = raw_cfg.setdefault("setups", {})
+            for d, v in edits.items():
+                setups[d] = {**setups.get(d, {}), **v}
+            if add:
+                setups[add] = {**setups.get(add, {}), "added": True}
+            if body.get("seen"):
+                raw_cfg["setups_seen"] = True
+
+        cw_store.update_config(apply)
+        config = cw_store.load_config()
+        self._send_json(200, {"ok": True, "agents": cw_llm.agents_payload(
+            config, cw_llm.valid_agent((config.get("agent_rules") or {}).get("last")))})
 
     def _route_shutdown(self):
         if not self._check_host() or not self._check_token_header() or not self._check_origin():
