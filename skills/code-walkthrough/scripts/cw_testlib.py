@@ -303,6 +303,11 @@ def _reply(op, argv, variables, data):
 
 argv = sys.argv[1:]
 
+if argv[:3] == ["auth", "token", "-u"]:
+    _log("auth-token", argv, None)
+    print("tok-" + argv[3])
+    sys.exit(0)
+
 if argv[:2] == ["api", "user"]:
     _reply("viewer", argv, None, {"login": cfg.get("viewer", "me")})
 

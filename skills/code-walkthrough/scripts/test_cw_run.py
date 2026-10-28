@@ -928,3 +928,13 @@ def test_ticket_hint_is_none_without_a_reference_or_in_explain_mode():
         assert cw_run.detect_ticket_hint(meta) is None
         assert cw_run.detect_ticket_hint({**meta, "explain": True, "head_ref": "TD-1"}) is None
 
+
+
+def test_agent_gh_token_is_the_repo_accounts_token(tmp_path):
+    # The agent's worktree sits outside the repo and Full turns hide the keyring, so the
+    # daemon resolves the repo's gh account itself and hands its token over.
+    with cw_testlib.fake_gh(tmp_path, viewer="ozone-me"):
+        assert cw_run.agent_gh_token({"repo": str(tmp_path)}) == "tok-ozone-me"
+    with cw_testlib.fake_gh(tmp_path, fail_ops=["viewer"]):
+        assert cw_run.agent_gh_token({"repo": str(tmp_path)}) is None
+    assert cw_run.agent_gh_token({}) is None

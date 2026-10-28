@@ -1094,6 +1094,9 @@ def _claude_turn(d, record, profile, config, anchor, question, on_event, live, o
         raise cw_store.CWError("Full access needs bubblewrap with overlayfs, which this machine lacks",
                                "install bubblewrap (Linux only); Review mode still works")
     cwd = Path(prepare()) if full else d / "head"
+    gh_token = cw_run.agent_gh_token(cw_store.read_meta(d))
+    env = {**(cw_llm.no_push_env() if full else {}), **({"CLAUDE_CONFIG_DIR": cdir} if cdir else {}),
+           **({"GH_TOKEN": gh_token} if gh_token else {})} or None
 
     def run(session_id=None, resume=None):
         if full:
@@ -1116,7 +1119,7 @@ def _claude_turn(d, record, profile, config, anchor, question, on_event, live, o
             argv, prompt, cwd=cwd, timeout=config["timeout_s"], qid=qid,
             thread_id=thread_id, on_event=on_event, live=live,
             sweep=lambda: sweep_outcomes(d, qid, thread_id, on_event),
-            env={**(cw_llm.no_push_env() if full else {}), **({"CLAUDE_CONFIG_DIR": cdir} if cdir else {})} or None)
+            env=env)
 
     st = run(resume=prior) if prior else run(session_id=str(uuid.uuid4()))
     if prior and st["returncode"] != 0 and not st["init"] and not live.get("cancelled"):
