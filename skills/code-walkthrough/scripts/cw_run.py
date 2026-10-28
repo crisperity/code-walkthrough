@@ -191,6 +191,24 @@ def own_pr(meta):
     return None if not login or not pr_author else login == pr_author
 
 
+def agent_gh_token(meta):
+    """Token of the gh account this repo resolves to, for an agent turn, else None. The turn runs
+    in a worktree outside the repo, so a per-directory account choice misses it, and Full turns
+    hide /run/user, so gh there cannot read its keyring."""
+    if not (meta or {}).get("repo"):
+        return None
+    try:
+        viewer = _gh(meta, ["api", "user"], timeout=20)
+        login = viewer.returncode == 0 and json.loads(viewer.stdout).get("login")
+        if not login:
+            return None
+        tok = subprocess.run(["gh", "auth", "token", "-u", login], env=gh_env(meta)[1],
+                             capture_output=True, text=True, timeout=10)
+    except (cw_store.CWError, ValueError, AttributeError, OSError, subprocess.SubprocessError):
+        return None
+    return tok.stdout.strip() if tok.returncode == 0 else None
+
+
 def _notes(meta, args, *, stdin=None):
     repo, env = gh_env(meta)
     return subprocess.run([sys.executable, str(SCRIPTS_DIR / "notes.py"), *args],
