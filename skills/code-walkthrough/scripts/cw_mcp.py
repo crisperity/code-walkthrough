@@ -305,6 +305,8 @@ OUTCOME_TOOLS.append({
                     "keep or remove. Nothing reaches GitHub until the user submits the review. Each comment "
                     "needs a path in the diff and a line (and optional end_line) inside one contiguous run "
                     "of diff lines on that side. suggestion is replacement code for RIGHT-side lines only. "
+                    "To revise a draft, set replaces to the id of that local draft (listed in your context): it is "
+                    "swapped for the new comment, so never post a second draft for the same point. "
                     "One call per turn; any invalid comment rejects the whole call."),
     "inputSchema": {
         "type": "object", "required": ["comments"],
@@ -318,6 +320,7 @@ OUTCOME_TOOLS.append({
                     "side": {"enum": ["RIGHT", "LEFT"]},
                     "body": {"type": "string", "maxLength": DRAFT_BODY_CAP},
                     "suggestion": {"type": "string", "maxLength": DRAFT_BODY_CAP},
+                    "replaces": {"type": "string"},
                 },
             },
         }},
@@ -476,16 +479,33 @@ def _check_draft_comments(anchor_doc, args, already):
         ranges = notes.postable_ranges((Path(anchor_doc["dir"]) / "raw.diff").read_text(errors="replace"))
     except (KeyError, OSError):
         return "the diff is unavailable, so no comment can be drafted"
+    drafts = _local_draft_ids(anchor_doc["dir"])
+    used = set()
     for i, item in enumerate(items):
-        error = _draft_item_error(item, ranges)
+        error = _draft_item_error(item, ranges, drafts)
         if error:
             return f"comments[{i}]: {error}"
+        replaces = item.get("replaces")
+        if replaces is not None:
+            if replaces in used:
+                return f"comments[{i}]: replaces {replaces} is already replaced by an earlier comment in this call"
+            used.add(replaces)
     if "draft_comments" in already:
         return "already posted draft comments in this turn"
     return None
 
 
-def _draft_item_error(item, ranges):
+def _local_draft_ids(d):
+    ids = set()
+    for name in ("state.json", "page-notes.json"):
+        doc = cw_store.read_json(Path(d) / name, default=None)
+        for n in doc.get("notes", []) if isinstance(doc, dict) else []:
+            if isinstance(n, dict) and n.get("origin") == "local" and n.get("state") == "draft":
+                ids.add(n.get("id"))
+    return ids
+
+
+def _draft_item_error(item, ranges, drafts):
     if not isinstance(item, dict):
         return "must be an object"
     path, line, end_line = item.get("path"), item.get("line"), item.get("end_line")
@@ -509,6 +529,10 @@ def _draft_item_error(item, ranges):
         return "body is required"
     if len(body.strip()) > DRAFT_BODY_CAP:
         return f"body must be at most {DRAFT_BODY_CAP} characters"
+    replaces = item.get("replaces")
+    if replaces is not None and (not isinstance(replaces, str) or not notes.VALID_ID_RE.fullmatch(replaces)
+                                 or replaces not in drafts):
+        return "replaces must be the id of an existing local draft (only drafts that already exist can be replaced, not ones created in this call)"
     suggestion = item.get("suggestion")
     if suggestion is not None:
         if not isinstance(suggestion, str) or len(suggestion) > DRAFT_BODY_CAP:
@@ -530,6 +554,8 @@ def _draft_comments_payload(args, anchor_doc=None):
         row = {"path": item["path"], "line": item["line"],
                "end_line": end_line if end_line != item["line"] else None,
                "side": item.get("side", "RIGHT"), "body": body}
+        if item.get("replaces"):
+            row["replaces"] = item["replaces"]
         key = json.dumps(row, sort_keys=True)
         if key not in seen:
             seen.add(key)

@@ -556,6 +556,29 @@ def test_check_draft_comments_cases():
         assert body.endswith(f"{fence}suggestion\n{text}\n{fence}")
 
 
+def test_check_draft_comments_replaces():
+    d = _diff_dir()
+    doc = {**_page_doc(), "dir": d}
+    drafts = [{"id": "n-1", "origin": "local", "state": "draft"},
+              {"id": "n-2", "origin": "local", "state": "posted"},
+              {"id": "n-3", "origin": "github", "state": "draft"}]
+    (Path(d) / "page-notes.json").write_text(json.dumps({"notes": drafts}))
+
+    def check(replaces):
+        return cw_mcp.check_outcome(doc, "post_draft_comments", {"comments": [_dc(replaces=replaces)]}, ())
+
+    assert check("n-1") is None
+    for bad in ("n-2", "n-3", "n-9", "bad id", 5):
+        assert "replaces must be" in check(bad), bad
+    assert "already replaced" in cw_mcp.check_outcome(
+        doc, "post_draft_comments", {"comments": [_dc(replaces="n-1"), _dc(line=3, replaces="n-1")]}, ())
+    (Path(d) / "page-notes.json").unlink()
+    (Path(d) / "state.json").write_text(json.dumps({"notes": drafts}))
+    assert check("n-1") is None
+    row = cw_mcp._draft_comments_payload({"comments": [_dc(replaces="n-1"), _dc(line=3)]})["comments"]
+    assert row[0]["replaces"] == "n-1" and "replaces" not in row[1]
+
+
 def test_outcomes_dispatch_rejects_tools_outside_the_mode(tmp_path):
     req = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "propose_task", "arguments": {}}}
     called = []

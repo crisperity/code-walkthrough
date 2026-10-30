@@ -19,7 +19,9 @@ http(s) links only.
 - `reload_walkthrough` shows your edits as a new walkthrough of the cw/<id>/agent commit, opened
   beside this one; it never rebuilds the current page. Call it once, after your last edit.
 - `post_draft_comments` puts review comments on diff lines as local drafts; nothing reaches GitHub
-  until the user submits the review.
+  until the user submits the review. To revise a draft (the user dislikes the wording), pass
+  `replaces: "<draft id>"` on the new comment (ids are in your context under drafts); never post a
+  second draft for the same point.
 - When the user's message names a slash command (`/check-pr`, `/fix-pr`) or a skill, that is a request
   to run it, and it overrides "Reply by default". Call the Skill tool for it first and follow it.
   Anything the skill would post to GitHub goes through the cw tools instead: review comments via

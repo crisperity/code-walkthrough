@@ -22,6 +22,7 @@ import sys
 import threading
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -979,45 +980,95 @@ def _run_visuals(d, meta, config, on_event, force=False):
         _emit_step(d, on_event, "visuals", "running")
         system_prompt = (SKILL_DIR / "prompts" / "visuals.md").read_text() + DELIVERY_SUFFIX.format(
             tool="submit_visuals")
-        messages = [{"role": "system", "content": system_prompt},
-                    {"role": "user", "content": _visuals_user_text(d, meta, analysis, symdelta, need_calls)}]
         tools, handlers = read_tools(d)
-        state: dict = {"attempt": 0}
         ctx = visuals.diff_ctx((d / "raw.diff").read_text(errors="replace"), symdelta)
+        on_usage = _make_on_usage(d, role, on_event, config)
 
-        def handler(args):
-            state["attempt"] += 1
-            clean, problems = visuals.check_visuals(args, n_groups, ctx)
-            calls = []
-            if need_calls:
-                calls, call_problems = visuals.check_calls(args.get("calls") if isinstance(args, dict) else None, ctx)
-                problems = problems + call_problems
-            if problems and state["attempt"] < 3:
-                return "gate: " + "\n".join(problems) + "\nfix and call submit_visuals again"
-            state["clean"], state["problems"], state["calls"] = clean, problems, calls
-            return cw_llm.Done({"ok": True})
+        def author(*job):
+            """Never raises: a failed call is an empty result plus a problem, so the others still land."""
+            try:
+                return _author(*job)
+            except Exception as e:
+                return {"pr": None, "overview": None, "groups": {}}, [f"{job[0]}: {e}"], []
 
-        local_handlers = dict(handlers)
-        local_handlers["submit_visuals"] = handler
-        try:
-            cw_llm.run_tools(
-                profile, messages, tools + [_visuals_submit_tool(need_calls)], local_handlers, max_rounds=8,
-                max_tokens=config["max_conversation_tokens"], timeout=config["timeout_s"],
-                on_usage=_make_on_usage(d, role, on_event, config), cwd=d / "head")
-        finally:
-            _write_transcript(d, "visuals", profile, messages, result="clean" in state)
-        clean = state["clean"]
-        if state["calls"]:
-            _write_model_symdelta(d, meta, symdelta, state["calls"])
+        def _author(name, scope, group=None):
+            """One scoped submit_visuals conversation -> (clean, problems, calls)."""
+            messages = [{"role": "system", "content": system_prompt},
+                        {"role": "user", "content": _visuals_user_text(
+                            d, meta, analysis, symdelta, need_calls and group is None) + "\n\n" + scope}]
+            state: dict = {"attempt": 0}
+
+            def handler(args):
+                state["attempt"] += 1
+                args = args if isinstance(args, dict) else {}
+                if group is None:
+                    scoped = {**args, "groups": []}
+                else:
+                    gs = args.get("groups")
+                    scoped = {"groups": [g for g in gs if isinstance(g, dict) and g.get("index") == group]
+                              if isinstance(gs, list) else []}
+                clean, problems = visuals.check_visuals(scoped, n_groups, ctx)
+                if group is not None and group not in clean["groups"] and not problems:
+                    problems = [f"visuals.groups: no picture for group {group}"]
+                calls = []
+                if group is None and need_calls:
+                    calls, call_problems = visuals.check_calls(args.get("calls"), ctx)
+                    problems = problems + call_problems
+                if problems and state["attempt"] < 3:
+                    return "gate: " + "\n".join(problems) + "\nfix and call submit_visuals again"
+                state["clean"], state["problems"], state["calls"] = clean, problems, calls
+                return cw_llm.Done({"ok": True})
+
+            local_handlers = dict(handlers)
+            local_handlers["submit_visuals"] = handler
+            error = None
+            try:
+                cw_llm.run_tools(
+                    profile, messages, tools + [_visuals_submit_tool(need_calls and group is None)],
+                    local_handlers, max_rounds=8, max_tokens=config["max_conversation_tokens"],
+                    timeout=config["timeout_s"], on_usage=on_usage, cwd=d / "head")
+            except Exception as e:
+                error = f"{name}: {e}"
+            finally:
+                _write_transcript(d, f"visuals-{name}", profile, messages, result="clean" in state, error=error)
+            if "clean" not in state:
+                return {"pr": None, "overview": None, "groups": {}}, [error or f"{name}: nothing submitted"], []
+            return state["clean"], state["problems"] + ([error] if error else []), state["calls"]
+
+        jobs = []
+        if visuals.symbol_digest(symdelta) or need_calls:
+            jobs.append(("overview", "Author only the overview" + (" (and `calls`)." if need_calls else "."), None))
+        jobs += [(f"group-{i}", f"Author only group {i}: submit one entry in `groups` with index {i}, "
+                                "and no overview.", i) for i in range(min(n_groups, visuals.MAX_GROUPS))]
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            results = list(pool.map(lambda j: author(*j), jobs))
+        clean = {"pr": None, "overview": None, "groups": {}}
+        problems, calls = [], []
+        if n_groups > visuals.MAX_GROUPS:
+            problems.append(f"visuals.groups: at most {visuals.MAX_GROUPS} pictures, "
+                            f"{n_groups - visuals.MAX_GROUPS} dropped")
+        for c, probs, cs in results:
+            clean["pr"] = clean["pr"] or c["pr"]
+            clean["overview"] = clean["overview"] or c["overview"]
+            clean["groups"].update(c["groups"])
+            problems += probs
+            calls += cs
+        size = {i: len(h.encode("utf-8", "replace")) for i, h in clean["groups"].items()}
+        while sum(size.values()) > visuals.TOTAL_MAX:
+            big = max(size, key=size.get)
+            del size[big], clean["groups"][big]
+            problems.append(f"visuals.groups: picture {big} dropped, over the {visuals.TOTAL_MAX // 1024} KB total")
+        if calls:
+            _write_model_symdelta(d, meta, symdelta, calls)
         else:
             (d / "symdelta.model.json").unlink(missing_ok=True)
         if not clean["overview"] and not clean["pr"] and not clean["groups"]:
-            raise RuntimeError("no usable pictures; dropped: " + "; ".join(state["problems"])[:500])
+            raise RuntimeError("no usable pictures; dropped: " + "; ".join(problems)[:500])
         cw_store.write_json(out, {
             "overview": clean["overview"],
             "pr": clean["pr"],
             "groups": [{"index": i, "html": h} for i, h in sorted(clean["groups"].items())]})
-        _emit_step(d, on_event, "visuals", "ok")
+        _emit_step(d, on_event, "visuals", "ok", **({"lines": problems} if problems else {}))
         return True
     except Exception as e:
         _emit_step(d, on_event, "visuals", "failed", error=str(e), remedy=getattr(e, "remedy", None))
