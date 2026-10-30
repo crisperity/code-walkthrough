@@ -306,18 +306,47 @@ def _submit(args):
     return cw_testlib.tool_call("submit_visuals", args)
 
 
+def _scope_of(body):
+    text = cw_testlib.last_user_text(body)
+    return "overview" if "Author only the overview" in text else "group-" + text.rsplit("Author only group ", 1)[1].split(":")[0]
+
+
+def _scoped(**replies):
+    """Scripted replies per visuals call (overview=[...], group_0=[...]); each call walks its own list."""
+    seen, lock = {}, threading.Lock()
+
+    def script(body, _n):
+        scope = _scope_of(body)
+        with lock:
+            n = seen[scope] = seen.get(scope, -1) + 1
+        entry = replies[scope.replace("-", "_")]
+        return entry[min(n, len(entry) - 1)]
+    return script
+
+
+def _requests_for(stub, scope):
+    return [r for r in stub.requests if _scope_of(r) == scope]
+
+
+def _tool_msgs(req):
+    return [m["content"] for m in req["messages"] if m.get("role") == "tool"]
+
+
+G0 = _submit({"groups": [{"index": 0, "html": "<p>g</p>"}]})
+
+
 def test_visuals_pass_repairs_then_writes_visuals_json():
     with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
         with cw_testlib.StubLLM({}) as stub:
             d, meta = _visuals_dir(home, tmp, stub)
             bad = {"pr": {"title": "T", "html": "<img src='x'>"}, "groups": []}
-            good = {"pr": {"title": "T", "html": GOOD_SVG}, "groups": [{"index": 0, "html": "<p>g</p>"}]}
-            stub.script = {"prose-m": [_submit(bad), _submit(good)]}
+            good = {"pr": {"title": "T", "html": GOOD_SVG}, "groups": []}
+            stub.script = _scoped(overview=[_submit(bad), _submit(good)], group_0=[G0])
             assert cw_run._run_visuals(d, meta, cw_store.load_config(), None)
-            gate = [m["content"] for m in stub.requests[1]["messages"] if m.get("role") == "tool"][-1]
+            gate = _tool_msgs(_requests_for(stub, "overview")[1])[-1]
             assert gate.startswith("gate:") and "<img> is not allowed" in gate
             assert gate.endswith("fix and call submit_visuals again")
-            assert "foo.py:run | foo.py:2-2 | changed" in cw_testlib.last_user_text(stub.requests[0])
+            assert "foo.py:run | foo.py:2-2 | changed" in cw_testlib.last_user_text(_requests_for(stub, "overview")[0])
             saved = json.loads((d / "visuals.json").read_text())
             assert saved["pr"]["title"] == "T" and saved["groups"] == [{"index": 0, "html": "<p>g</p>"}]
             assert cw_store.read_meta(d)["steps"]["visuals"]["status"] == "ok"
@@ -344,13 +373,13 @@ def test_visuals_pass_returns_overview_problems_and_writes_overview():
             d, meta = _visuals_dir(home, tmp, stub)
             bad = {"overview": _overview("bar.py:not_there"), "groups": []}
             good = {"overview": _overview("foo.py:X"), "groups": []}
-            stub.script = {"prose-m": [_submit(bad), _submit(good)]}
+            stub.script = _scoped(overview=[_submit(bad), _submit(good)], group_0=[G0])
             assert cw_run._run_visuals(d, meta, cw_store.load_config(), None)
-            gate = [m["content"] for m in stub.requests[1]["messages"] if m.get("role") == "tool"][-1]
+            gate = _tool_msgs(_requests_for(stub, "overview")[1])[-1]
             assert gate.startswith("gate:") and "overview.nodes[1].refs[0]: bar.py:not_there not in diff" in gate
             saved = json.loads((d / "visuals.json").read_text())
             assert saved["overview"]["title"] == "Foo changes" and len(saved["overview"]["nodes"]) == 2
-            assert saved["groups"] == [] and saved["pr"] is None
+            assert saved["groups"] == [{"index": 0, "html": "<p>g</p>"}] and saved["pr"] is None
 
 
 def test_visuals_pass_prefers_the_visuals_role_over_prose():
@@ -361,7 +390,7 @@ def test_visuals_pass_prefers_the_visuals_role_over_prose():
                                     {"analysis": "p", "prose": "p", "visuals": "v"})
             stub.script = {"vis-m": [_submit({"pr": None, "groups": [{"index": 0, "html": "<p>n</p>"}]})]}
             assert cw_run._run_visuals(d, meta, cw_store.load_config(), None)
-            assert stub.count("vis-m") == 1 and stub.count("prose-m") == 0
+            assert stub.count("vis-m") == 2 and stub.count("prose-m") == 0
 
 
 def test_visuals_pass_keeps_the_clean_part_on_the_final_attempt():
@@ -374,7 +403,7 @@ def test_visuals_pass_keeps_the_clean_part_on_the_final_attempt():
             assert cw_run._run_visuals(d, meta, cw_store.load_config(), None)
             saved = json.loads((d / "visuals.json").read_text())
             assert saved["pr"] is None and saved["groups"][0]["index"] == 0
-            assert stub.count("prose-m") == 3
+            assert stub.count("prose-m") == 4
 
 
 def test_visuals_pass_fails_when_nothing_clean_survives_the_final_attempt():
@@ -410,6 +439,67 @@ def test_visuals_pass_runs_without_symbols_when_there_are_groups():
             assert cw_run._run_visuals(d, meta, cw_store.load_config(), None)
             assert "symbols (id" not in cw_testlib.last_user_text(stub.requests[0])
             assert "0 | Core | the change | foo.py" in cw_testlib.last_user_text(stub.requests[0])
+
+
+def _two_group_dir(home, tmp, stub):
+    d, meta = _visuals_dir(home, tmp, stub)
+    analysis = json.loads((d / "analysis.json").read_text())
+    analysis["groups"].append({"title": "Edge", "why": "w", "paths": ["foo.py"]})
+    (d / "analysis.json").write_text(json.dumps(analysis))
+    return d, meta
+
+
+def _group(i):
+    return _submit({"groups": [{"index": i, "html": f"<p>g{i}</p>"}]})
+
+
+def test_visuals_groups_are_authored_in_parallel_calls_and_merged():
+    with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
+        with cw_testlib.StubLLM({}, delay=0.2) as stub:
+            d, meta = _two_group_dir(home, tmp, stub)
+            stub.script = _scoped(overview=[_submit({"overview": _overview()})],
+                                  group_0=[_group(0)], group_1=[_group(1)])
+            assert cw_run._run_visuals(d, meta, cw_store.load_config(), None)
+            assert stub.peak_in_flight == 3
+            saved = json.loads((d / "visuals.json").read_text())
+            assert set(saved) == {"overview", "pr", "groups"} and saved["overview"]["title"] == "Foo changes"
+            assert saved["groups"] == [{"index": 0, "html": "<p>g0</p>"}, {"index": 1, "html": "<p>g1</p>"}]
+            assert {p.name for p in (d / "runs").glob("visuals-*")} == {
+                "visuals-overview-1.json", "visuals-group-0-1.json", "visuals-group-1-1.json"}
+            assert cw_store.read_meta(d)["usage"]["prose"]["calls"] == 3
+
+
+def test_a_failing_group_is_dropped_and_the_rest_still_written():
+    with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
+        with cw_testlib.StubLLM({}) as stub:
+            d, meta = _two_group_dir(home, tmp, stub)
+            stub.script = _scoped(overview=[_submit({"overview": _overview()})], group_0=[_group(0)],
+                                  group_1=[_submit({"groups": [{"index": 1, "html": "<img src='x'>"}]})])
+            assert cw_run._run_visuals(d, meta, cw_store.load_config(), None)
+            saved = json.loads((d / "visuals.json").read_text())
+            assert saved["groups"] == [{"index": 0, "html": "<p>g0</p>"}] and saved["overview"]
+            assert cw_store.read_meta(d)["steps"]["visuals"]["status"] == "ok"
+
+
+def test_a_group_call_that_errors_does_not_fail_the_others():
+    with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
+        with cw_testlib.StubLLM({}) as stub:
+            d, meta = _two_group_dir(home, tmp, stub)
+            stub.script = _scoped(overview=[_submit({"overview": _overview()})], group_0=[_group(0)],
+                                  group_1=[cw_testlib.http_error(400, "nope")])
+            assert cw_run._run_visuals(d, meta, cw_store.load_config(), None)
+            assert [g["index"] for g in json.loads((d / "visuals.json").read_text())["groups"]] == [0]
+            assert "nope" in json.loads((d / "runs" / "visuals-group-1-1.json").read_text())["error"]
+
+
+def test_visuals_group_call_must_submit_its_own_index():
+    with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
+        with cw_testlib.StubLLM({}) as stub:
+            d, meta = _visuals_dir(home, tmp, stub, symbols=False)
+            stub.script = _scoped(group_0=[_group(5), _group(0)])
+            assert cw_run._run_visuals(d, meta, cw_store.load_config(), None)
+            assert "no picture for group 0" in _tool_msgs(_requests_for(stub, "group-0")[1])[-1]
+            assert json.loads((d / "visuals.json").read_text())["groups"][0]["html"] == "<p>g0</p>"
 
 
 def test_visuals_llm_error_marks_the_step_failed_and_never_raises():
@@ -736,7 +826,7 @@ def _calls_run(symdelta, groups=False):
             bad = {"groups": pic, "calls": [{"from": "foo.py:nope", "to": "foo.py:X", "state": "new"}]}
             good = {"groups": pic, "calls": [{"from": "foo.py:X", "to": "foo.py:b", "state": "new"},
                                             {"from": "foo.py:b", "to": "foo.py:X", "state": "gone"}]}
-            stub.script = {"prose-m": [_submit(bad), _submit(good)]}
+            stub.script = _scoped(overview=[_submit(bad), _submit(good)], group_0=[_submit({"groups": pic})])
             ran = cw_run._run_visuals(d, meta, cw_store.load_config(), None)
             model = d / "symdelta.model.json"
             return (model.read_text() if model.exists() else None), stub, ran
@@ -745,10 +835,11 @@ def _calls_run(symdelta, groups=False):
 def test_null_language_asks_for_calls_and_writes_model_symdelta():
     model, stub, ran = _calls_run(NULL_SYMDELTA)
     assert ran
-    props = stub.requests[0]["tools"][-1]["function"]["parameters"]["properties"]
-    assert "calls" in props
-    assert "also submit `calls`" in cw_testlib.last_user_text(stub.requests[0])
-    gate = [m["content"] for m in stub.requests[1]["messages"] if m.get("role") == "tool"][-1]
+    first = _requests_for(stub, "overview")[0]
+    assert "calls" in first["tools"][-1]["function"]["parameters"]["properties"]
+    assert "also submit `calls`" in cw_testlib.last_user_text(first)
+    assert "calls" not in _requests_for(stub, "group-0")[0]["tools"][-1]["function"]["parameters"]["properties"]
+    gate = _tool_msgs(_requests_for(stub, "overview")[1])[-1]
     assert "calls[0].from: foo.py:nope not in diff" in gate
     saved = json.loads(model)
     assert saved["resolver"] == "model" and saved["language"] == "model"
@@ -761,7 +852,7 @@ def test_real_symdelta_never_asks_for_calls_or_writes_model_file():
     model, stub, _ran = _calls_run({"language": "python", "nodes": [
         {"id": "foo.py:X", "label": "X", "kind": "symbol", "file": "foo.py", "state": "changed"}]}, groups=True)
     assert "calls" not in stub.requests[0]["tools"][-1]["function"]["parameters"]["properties"]
-    assert "also submit `calls`" not in cw_testlib.last_user_text(stub.requests[0])
+    assert all("also submit `calls`" not in cw_testlib.last_user_text(r) for r in stub.requests)
     assert model is None
 
 
@@ -938,3 +1029,57 @@ def test_agent_gh_token_is_the_repo_accounts_token(tmp_path):
     with cw_testlib.fake_gh(tmp_path, fail_ops=["viewer"]):
         assert cw_run.agent_gh_token({"repo": str(tmp_path)}) is None
     assert cw_run.agent_gh_token({}) is None
+
+
+def _two_groups(d):
+    a = json.loads((d / "analysis.json").read_text())
+    a["groups"] = [{"title": f"G{i}", "why": "w", "paths": ["foo.py"]} for i in range(2)]
+    (d / "analysis.json").write_text(json.dumps(a))
+
+
+def test_visuals_pass_survives_a_call_that_raises(monkeypatch):
+    with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
+        with cw_testlib.StubLLM({}) as stub:
+            d, meta = _visuals_dir(home, tmp, stub, symbols=False)
+            _two_groups(d)
+            real = cw_run._write_transcript
+
+            def flaky(d_, role, *a, **k):
+                if role == "visuals-group-0":
+                    raise OSError("disk full")
+                return real(d_, role, *a, **k)
+            monkeypatch.setattr(cw_run, "_write_transcript", flaky)
+            g = lambda i: _submit({"groups": [{"index": i, "html": "<p>g</p>"}]})
+            stub.script = _scoped(group_0=[g(0)], group_1=[g(1)])
+            assert cw_run._run_visuals(d, meta, cw_store.load_config(), None)
+            saved = json.loads((d / "visuals.json").read_text())
+            assert [x["index"] for x in saved["groups"]] == [1]
+            assert any("disk full" in x for x in cw_store.read_meta(d)["steps"]["visuals"]["lines"])
+
+
+def test_visuals_pass_reapplies_the_total_cap_across_groups(monkeypatch):
+    with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
+        with cw_testlib.StubLLM({}) as stub:
+            d, meta = _visuals_dir(home, tmp, stub, symbols=False)
+            _two_groups(d)
+            monkeypatch.setattr(cw_run.visuals, "TOTAL_MAX", 12)
+            g = lambda i: _submit({"groups": [{"index": i, "html": "<p>g</p>"}]})
+            stub.script = _scoped(group_0=[g(0)], group_1=[g(1)])
+            assert cw_run._run_visuals(d, meta, cw_store.load_config(), None)
+            saved = json.loads((d / "visuals.json").read_text())
+            assert len(saved["groups"]) == 1
+            assert any("dropped, over" in x for x in cw_store.read_meta(d)["steps"]["visuals"]["lines"])
+
+
+def test_visuals_pass_notes_groups_beyond_the_max():
+    with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
+        with cw_testlib.StubLLM({}) as stub:
+            d, meta = _visuals_dir(home, tmp, stub, symbols=False)
+            n = cw_run.visuals.MAX_GROUPS + 2
+            a = json.loads((d / "analysis.json").read_text())
+            a["groups"] = [{"title": f"G{i}", "why": "w", "paths": ["foo.py"]} for i in range(n)]
+            (d / "analysis.json").write_text(json.dumps(a))
+            stub.script = _scoped(**{f"group_{i}": [_submit({"groups": [{"index": i, "html": "<p>g</p>"}]})]
+                                     for i in range(n)})
+            assert cw_run._run_visuals(d, meta, cw_store.load_config(), None)
+            assert any("2 dropped" in x for x in cw_store.read_meta(d)["steps"]["visuals"]["lines"])

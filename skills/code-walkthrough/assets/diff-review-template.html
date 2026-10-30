@@ -5106,6 +5106,8 @@ if(window.CW_LIVE){
         note.body=String(c.body||'');
         saveNote(note);
         made=true;
+        const old=c.replaces&&noteById(c.replaces);
+        if(old&&old.origin==='local'&&old.state==='draft') deleteNote(old.id);
       });
       if(made) renderNotes();
       if(ids.length&&!dcPosted.has(o.oid)){

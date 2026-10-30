@@ -8,7 +8,7 @@
     {
       "name": "code-walkthrough",
       "description": "code-walkthrough: turn a diff, branch, PR, or existing code into a top-down walkthrough page: overview, story map, call graph, annotated diff, and line comments you hand back to the agent",
-      "version": "1.2.1",
+      "version": "1.3.0",
       "source": "./",
       "author": {
         "name": "crisperity"
