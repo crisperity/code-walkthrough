@@ -739,3 +739,27 @@ def test_check_calls_caps_and_shape():
     many = [{"from": f"a.py:new_helper", "to": "b.py:new_helper", "state": "new"}] * 61
     calls, problems = v.check_calls(many, ctx)
     assert len(calls) == 1 and "at most 60, 1 dropped" in problems[0]
+
+
+def test_check_concepts_keeps_text_when_the_picture_is_rejected():
+    c = {"title": " Live  config ", "before": "b", "after": "a", "why": "w"}
+    clean, problems = v.check_concepts([{**c, "html": "<p>ok</p>"}, {**c, "html": "<img src='x'>"}, {**c}])
+    assert clean == [{"title": "Live config", "before": "b", "after": "a", "why": "w", "html": "<p>ok</p>"},
+                     {"title": "Live config", "before": "b", "after": "a", "why": "w"}]
+    assert any("concepts[1].html" in p and "<img> is not allowed" in p for p in problems)
+    assert any("at most 2" in p for p in problems)
+    assert v.check_concepts([{**c, "why": ""}]) == ([], ["visuals.concepts[0]: why must be non-empty plain text"])
+
+
+def test_check_visuals_carries_concepts_and_leaves_legacy_shape_alone():
+    c = {"title": "T", "before": "b", "after": "a", "why": "w", "html": "<p>x</p>"}
+    clean, problems = v.check_visuals({"concepts": [c], "groups": []}, 1)
+    assert problems == [] and clean["concepts"] == [c]
+    assert "concepts" not in v.check_visuals({"groups": []}, 1)[0]
+
+
+def test_check_concepts_clips_long_text_at_a_word_boundary_instead_of_dropping():
+    c = {"title": "T " * 60, "before": "word " * 60, "after": "a", "why": "w" * 300}
+    (item,), problems = v.check_concepts([c])
+    assert problems == [] and len(item["title"]) <= v.TITLE_MAX and len(item["before"]) <= 200
+    assert item["before"].endswith("word\u2026") and len(item["why"]) == 200

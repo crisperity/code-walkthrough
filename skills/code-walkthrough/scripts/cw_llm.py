@@ -338,7 +338,7 @@ def claude_call(profile, system, prompt, *, cwd, tools, schema=None, timeout=300
 
 # cw_mcp imports this module, so the names are literal here; test_cw_task pins them to outcome_tools.
 THREAD_ALLOWED = ",".join(f"mcp__cw__{n}" for n in (
-    "propose_resolve", "propose_page_edit", "propose_github_draft", "propose_task", "post_draft_comments"))
+    "propose_resolve", "propose_page_edit", "define_terms", "propose_github_draft", "propose_task", "post_draft_comments"))
 
 
 def thread_argv(profile, system, *, mcp_config, add_dir, session_id=None, resume=None):

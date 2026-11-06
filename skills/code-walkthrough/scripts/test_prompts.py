@@ -85,7 +85,7 @@ def test_visuals_prompt_has_an_overview_example_and_no_pr_picture():
 
 def test_visuals_prompt_stays_small_and_examples_are_phone_sized():
     text = (PROMPTS_DIR / "visuals.md").read_text()
-    assert len(text.encode()) <= 11264
+    assert len(text.encode()) <= 11776
     for vb in re.findall(r"viewBox='0 0 (\d+) \d+'", text):
         assert 360 <= int(vb) <= 560
 

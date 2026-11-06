@@ -1270,6 +1270,11 @@ def answer(d, qid, anchor, question, on_event=None, thread_id=None, live=None, s
         record.update(status="error", error=str(e), remedy=None)
 
     sweep_outcomes(d, qid, record["thread_id"], on_event)
+    if record["status"] == "ok":
+        defined = next((o for o in read_outcomes(d) if o["qid"] == qid and o["outcome"] == "terms"), None)
+        terms = cw_mcp.clean_terms((defined or {}).get("payload", {}).get("terms"), record.get("answer") or "")
+        if terms:
+            record["terms"] = terms
     if live.get("queued_behind"):
         record["queued_behind"] = live["queued_behind"]
     if after_turn:

@@ -906,6 +906,12 @@
   .cw-turn{margin:8px 0}
   .cw-turn-q{margin:0;color:var(--muted);font-style:italic;overflow-wrap:anywhere;white-space:pre-wrap}
   .cw-turn-a{margin:4px 0 0;overflow-wrap:anywhere}
+  .cw-term{text-decoration:underline dotted;text-underline-offset:3px;cursor:help;-webkit-touch-callout:none}
+  .cw-term:focus-visible{outline:2px solid var(--accent);outline-offset:1px;border-radius:2px}
+  .cw-term-pop{position:fixed;z-index:1000;max-width:min(18rem,calc(100vw - 16px));padding:8px 10px;
+    background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:8px;
+    box-shadow:0 4px 14px rgba(0,0,0,.25);font-size:var(--fs-sm);line-height:1.45;pointer-events:none}
+  .cw-term-pop[hidden]{display:none}
   .cw-md>*{margin:6px 0}
   .cw-md>:first-child{margin-top:0}
   .cw-md pre{white-space:pre-wrap;max-width:100%;overflow-x:auto}
@@ -1196,6 +1202,17 @@
   .cw-vis:not(.cw-ov-wrap):has(svg){cursor:zoom-in}
   .cw-vis img{max-width:100%}
   .cw-vis-group{margin:8px 0 14px}
+
+  /* First-glance concepts (render.py concepts_html): a card per idea, picture then Before/After/Why. */
+  .cw-concept{margin:12px 0;padding:12px;background:var(--panel);border:1px solid var(--border);border-radius:10px}
+  .cw-concept-title{margin:0 0 4px;font-weight:700;font-size:var(--fs-md)}
+  .cw-concept .cw-vis{margin:8px 0;padding:8px;background:var(--bg)}
+  .cw-concept-ba{margin:8px 0 0;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px}
+  .cw-concept-ba div{padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-left:3px solid var(--muted);border-radius:6px}
+  .cw-concept-ba .cw-concept-before{border-left-color:var(--red)} .cw-concept-ba .cw-concept-after{border-left-color:var(--green)}
+  .cw-concept-ba .cw-concept-why{border-left-color:var(--accent)}
+  .cw-concept-ba dt{margin:0 0 2px;font-size:var(--fs-sm);font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .cw-concept-ba dd{margin:0;font-size:var(--fs-md);line-height:1.4}
 
   /* System change diagram (render.py overview_svg). Kind colour is one custom property per kind
      so node, chip, legend swatch and edge all read the same theme variable. */
@@ -2643,7 +2660,7 @@ if(window.CW_LIVE){
     return wrap;
   }
 
-  function mdEl(text){
+  function mdEl(text,terms){
     const frag=document.createDocumentFragment();
     const listEl=l=>{
       const e=document.createElement(l.ordered?'ol':'ul');
@@ -2661,7 +2678,90 @@ if(window.CW_LIVE){
       else if(b.kind==='list') frag.append(listEl(b));
       else frag.append(richEl('p',b.text));
     }
+    if(Array.isArray(terms)&&terms.length) markTerms(frag,terms);
     return frag;
+  }
+
+  // Glossary: the first whole-word, case-insensitive occurrence of each term outside code and
+  // links becomes a focusable .cw-term; the definition shows in one shared tooltip. The boundary
+  // rule mirrors cw_mcp.clean_terms; longer terms go first so "order book" beats "order".
+  const termDefs=new WeakMap();
+  const termRe=term=>new RegExp('(?<![\\p{L}\\p{N}_])'
+    +term.trim().split(/\s+/).map(w=>w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('\\s+')
+    +'(?![\\p{L}\\p{N}_])','iu');
+  function markTerms(root,terms){
+    const valid=terms.filter(t=>t&&typeof t.term==='string'&&typeof t.def==='string'&&t.term.trim()&&t.def);
+    for(const t of valid.sort((a,b)=>b.term.length-a.term.length)){
+      const re=termRe(t.term);
+      const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);
+      for(let n=walker.nextNode();n;n=walker.nextNode()){
+        const par=n.parentElement;
+        if(!par||par.closest('code,pre,a,.cw-term')) continue;
+        const m=re.exec(n.data);
+        if(!m) continue;
+        const hit=n.splitText(m.index);
+        hit.splitText(m[0].length);
+        const el=mk('span','cw-term',m[0]);
+        el.tabIndex=0;
+        termDefs.set(el,t.def);
+        hit.replaceWith(el);
+        break;
+      }
+    }
+  }
+
+  const termPop={el:null,anchor:null,timer:0,watch:null};
+  function hideTerm(){
+    clearTimeout(termPop.timer);
+    if(termPop.watch) termPop.watch.disconnect();
+    if(termPop.el) termPop.el.hidden=true;
+    if(termPop.anchor) termPop.anchor.removeAttribute('aria-describedby');
+    termPop.anchor=null;
+  }
+  function showTerm(el){
+    if(termPop.anchor===el) return;
+    hideTerm();
+    if(!termPop.el){
+      const p=mk('div','cw-term-pop'); p.id='cw-term-pop'; p.setAttribute('role','tooltip'); p.hidden=true;
+      document.body.append(p);
+      termPop.el=p;
+      termPop.watch=new MutationObserver(()=>{ if(termPop.anchor&&!termPop.anchor.isConnected) hideTerm(); });
+    }
+    const p=termPop.el;
+    p.textContent=termDefs.get(el)||'';
+    p.style.left=p.style.top='0px';
+    p.hidden=false;
+    el.setAttribute('aria-describedby',p.id);
+    termPop.anchor=el;
+    termPop.watch.observe(document.body,{childList:true,subtree:true});
+    const r=el.getBoundingClientRect(), w=document.documentElement.clientWidth;
+    const left=Math.max(8,Math.min(r.left,w-p.offsetWidth-8));
+    const below=r.bottom+6+p.offsetHeight<=window.innerHeight||r.top<p.offsetHeight+12;
+    p.style.left=left+'px';
+    p.style.top=(below?r.bottom+6:r.top-6-p.offsetHeight)+'px';
+  }
+  {
+    const termOf=e=>e.target.closest?e.target.closest('.cw-term'):null;
+    document.addEventListener('pointerover',e=>{ const el=termOf(e); if(el&&e.pointerType==='mouse') showTerm(el); });
+    document.addEventListener('pointerout',e=>{
+      if(e.pointerType==='mouse'&&termOf(e)&&!(e.relatedTarget&&e.relatedTarget.closest&&e.relatedTarget.closest('.cw-term'))) hideTerm();
+    });
+    // :focus-visible keeps a touch or mouse tap from opening it; those use hover or the long press.
+    document.addEventListener('focusin',e=>{ const el=termOf(e); if(el&&el.matches(':focus-visible')) showTerm(el); });
+    document.addEventListener('focusout',e=>{ if(termOf(e)) hideTerm(); });
+    document.addEventListener('pointerdown',e=>{
+      const el=termOf(e);
+      if(el&&e.pointerType!=='mouse'){ clearTimeout(termPop.timer); termPop.timer=setTimeout(()=>showTerm(el),400); }
+      else if(!el) hideTerm();
+    });
+    for(const ev of ['pointerup','pointercancel','pointermove']) document.addEventListener(ev,e=>{
+      if(e.pointerType!=='mouse'&&!termPop.anchor) clearTimeout(termPop.timer);
+    });
+    document.addEventListener('contextmenu',e=>{ if(termOf(e)&&termPop.anchor) e.preventDefault(); });
+    document.addEventListener('keydown',e=>{
+      if(e.key==='Escape'&&termPop.anchor){ hideTerm(); e.stopPropagation(); }
+    },true);
+    window.addEventListener('scroll',hideTerm,true);
   }
 
   // Pinned locale: the page's own text is English, so a browser-locale relative/absolute
@@ -5153,6 +5253,7 @@ if(window.CW_LIVE){
     }
 
     function outcomeEl(t,o){
+      if(o.outcome==='terms') return null;
       if(o.outcome==='draft_comments') return draftCommentsCard(o);
       if(o.outcome==='task') return taskCard(t,o);
       if(o.outcome==='page_edit') return pageEditCard(t,o);
@@ -5235,7 +5336,7 @@ if(window.CW_LIVE){
         d.append(mk('p','cw-turn-a cw-turn-err','Error: '+(r.error||'unknown')+(r.remedy?' ('+r.remedy+')':'')));
       } else {
         const a=mk('div','cw-turn-a cw-md');
-        a.append(mdEl(r.answer||''));
+        a.append(mdEl(r.answer||'',r.terms));
         if(r.status==='cancelled') a.append(mk('span','cw-stopped','(stopped)'));
         d.append(a);
       }
@@ -5264,7 +5365,7 @@ if(window.CW_LIVE){
         }
       }
       if((r.status==='error'||r.status==='cancelled')&&isLast) d.append(retryBtn(t,r));
-      for(const o of (outcomesByQid.get(r.qid)||new Map()).values()) d.append(outcomeEl(t,o));
+      for(const o of (outcomesByQid.get(r.qid)||new Map()).values()){ const oe=outcomeEl(t,o); if(oe) d.append(oe); }
       return d;
     }
 

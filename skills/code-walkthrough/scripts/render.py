@@ -254,6 +254,30 @@ def overview_html(ov, explain, target_of=lambda item: "", symbols=""):
             f'<div class="cw-ov-chips">{chips}</div></div>{symbols}</section>')
 
 
+_CONCEPT_ROWS = {"before": "Before", "after": "After", "why": "Why"}
+
+
+def concepts_html(concepts, explain):
+    """First on the page: per concept its picture (if any) and a Before / After / Why block. The text
+    is the fallback when there is no picture; malformed entries are skipped."""
+    cards = []
+    for c in concepts if isinstance(concepts, list) else []:
+        c = c if isinstance(c, dict) else {}
+        title, html = c.get("title"), c.get("html")
+        if not all(isinstance(v, str) and v for v in (title, *(c.get(k) for k in _CONCEPT_ROWS))):
+            continue
+        pic = (f'<div class="cw-vis cw-concept-vis" role="group" aria-label="{escape(title)}">{html}</div>'
+               if isinstance(html, str) and html else "")
+        rows = "".join(f'<div class="cw-concept-{k}"><dt>{label}</dt><dd>{_html_prose(c[k])}</dd></div>'
+                       for k, label in _CONCEPT_ROWS.items())
+        cards.append(f'<article class="cw-concept"><p class="cw-concept-title">{escape(title)}</p>'
+                     f'{pic}<dl class="cw-concept-ba">{rows}</dl></article>')
+    if not cards:
+        return ""
+    return (f'<section class="cw-concepts" id="cw-concepts" aria-labelledby="cw-concepts-h">'
+            f'<h2 id="cw-concepts-h">{"The idea" if explain else "What changes"}</h2>{"".join(cards)}</section>')
+
+
 _CTX_SOURCES = ("jira", "github", "linear", "other")
 _CTX_FOUND_IN = {"branch": "branch name", "pr_body": "PR description", "commit": "a commit message", "link": "a pasted link"}
 _CTX_STATUS = {"covered": ("ok", "\u2713"), "partial": ("pt", "\u25d0"), "missing": ("no", "\u2717"), "extra": ("ex", "+")}
@@ -448,6 +472,10 @@ def render_html(analysis, files, template, walkthrough="", links=None, title=Non
     if not explain:
         body.append(context_html(context, files, (links or {}).get("head_sha", ""), building, ticket_hint))
 
+    clean = visuals or {}
+    if concepts_block := concepts_html(clean.get("concepts"), explain):
+        body.append(concepts_block)
+
     overview = _paragraphs(analysis.get("overview"))
     if overview:
         # One heading in both modes: the topic a cold reader needs is the same shape whether
@@ -461,7 +489,6 @@ def render_html(analysis, files, template, walkthrough="", links=None, title=Non
     symbols_block = ('<details class="cw-allsyms"><summary>All symbols</summary>'
                      f'{all_symbols.rstrip(chr(10))}</details>') if all_symbols else ""
 
-    clean = visuals or {}
     pr_picture = clean.get("pr")
     ov = clean.get("overview")
     if ov:
@@ -527,8 +554,9 @@ def load_visuals(path, n_groups, placed=None, ctx=None):
             del clean["groups"][idx]
             problems.append(f"visuals.groups[{idx}]: group has no files on this page")
     raw = raw if isinstance(raw, dict) else {}
-    total = int(bool(raw.get("pr"))) + int(raw.get("overview") is not None) + (len(raw["groups"]) if isinstance(raw.get("groups"), list) else 0)
-    kept = int(bool(clean["pr"])) + int(bool(clean["overview"])) + len(clean["groups"])
+    total = int(bool(raw.get("pr"))) + int(raw.get("overview") is not None) + (len(raw["groups"]) if isinstance(raw.get("groups"), list) else 0) \
+        + (len(raw["concepts"]) if isinstance(raw.get("concepts"), list) else 0)
+    kept = int(bool(clean["pr"])) + int(bool(clean["overview"])) + len(clean["groups"]) + len(clean.get("concepts", []))
     return clean, [f"visuals: {kept} kept, {max(total - kept, 0)} dropped"] + [
         f"visuals: {problem}" for problem in problems]
 

@@ -326,7 +326,7 @@ def test_live_ui_never_uses_html_injection_sinks():
     assert "e.textContent=text" in mk
     assert "window.open(r.url,'_blank','noopener')" in wire_ask
     turn = _between(wire_ask, "function turnEl(", "function upsertOutcome(")
-    assert "mdEl(r.answer||'')" in turn and "mk('p','cw-turn-a',r.answer" not in turn
+    assert "mdEl(r.answer||'',r.terms)" in turn and "mk('p','cw-turn-a',r.answer" not in turn
     assert "pre-wrap" not in re.search(r"\.cw-turn-a\{[^}]*\}", template).group(0)
     assert "mdEl(n.body)" in template
 
@@ -1710,3 +1710,40 @@ def test_resolved_thread_without_resolution_posts_to_resolve_thread_and_listens_
     assert "'/resolve-thread'" in tpl and "JSON.stringify({thread_id:root.gh_thread_id})" in tpl
     assert "addEventListener('thread_resolution'" in tpl and "__cwOnThreadResolution" in tpl
     assert "b.status==='done'" in tpl and ".catch(()=>fail(null))" in tpl and "es.addEventListener('open'" in tpl and "__cwResetHow" in tpl and "r.status===409" in tpl and "r.status===404" in tpl
+
+
+def test_concepts_render_first_with_text_fallback_and_legacy_pages_are_unchanged():
+    c = {"title": "Live <config>", "before": "Constants", "after": "Read `live`", "why": "No deploy"}
+    out = pics({"pr": None, "groups": {}, "concepts": [{**c, "html": "<p>pic</p>"}, {**c, "title": "Two"}]})
+
+    assert out.index('id="cw-concepts"') < out.index("<h2>Overview</h2>")
+    assert out.count('<article class="cw-concept">') == 2
+    assert 'Live &lt;config&gt;' in out and "<code>live</code>" in out
+    assert out.count('class="cw-vis cw-concept-vis"') == 1 and "<p>pic</p>" in out
+    assert "<dt>Before</dt><dd>Constants</dd>" in out and "<dt>Why</dt><dd>No deploy</dd>" in out
+    assert "cw-concepts" not in pics({"pr": PR_PIC, "groups": {}})
+
+
+def test_load_visuals_counts_and_sanitises_concepts(tmp_path):
+    c = {"title": "T", "before": "b", "after": "a", "why": "w"}
+    raw = {"concepts": [{**c, "html": "<script>x</script>"}], "groups": []}
+    clean, lines = load_visuals(_visuals_file(tmp_path, raw), 1)
+
+    assert clean["concepts"] == [c] and lines[0] == "visuals: 1 kept, 0 dropped"
+
+
+def test_concept_text_is_escaped_and_malformed_concepts_are_skipped():
+    hostile = {"title": "<script>t()</script>", "before": "<img src=x onerror=a()>", "after": "a", "why": "w"}
+    out = pics({"pr": None, "groups": {}, "concepts": [hostile, {"title": "no rows"}, "junk", None]})
+
+    assert out.count('<article class="cw-concept">') == 1
+    assert "<script>t()" not in out and "<img src=x" not in out and "&lt;script&gt;" in out
+    assert pics({"pr": None, "groups": {}, "concepts": ["junk"]}) == pics({"pr": None, "groups": {}})
+
+
+def test_legacy_visuals_json_without_concepts_loads_and_renders_unchanged(tmp_path):
+    raw = {"pr": PR_PIC, "groups": [{"index": 0, "html": "<p>fine</p>"}]}
+    clean, lines = load_visuals(_visuals_file(tmp_path, raw), 1)
+
+    assert "concepts" not in clean and lines == ["visuals: 2 kept, 0 dropped"]
+    assert "cw-concept" not in pics(clean)
