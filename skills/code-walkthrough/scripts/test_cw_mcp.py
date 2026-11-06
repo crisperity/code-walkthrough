@@ -748,6 +748,7 @@ def test_define_terms_validates_dedupes_caps_and_needs_no_reference():
     cleaned = cw_mcp.clean_terms(many + [pair("  spaced   out ", "d" * 300)])
     assert [t["term"] for t in cleaned] == [f"term{i}" for i in range(5)]
     assert cw_mcp.clean_terms([pair("  spaced   out ", "d" * 300)]) == [{"term": "spaced out", "def": "d" * 240}]
+    assert len(cw_mcp.clean_terms([pair(f"term{i}") for i in range(20)], cap=cw_mcp.GLOSSARY_MAX)) == cw_mcp.GLOSSARY_MAX
     assert cw_mcp.OUTCOME_KINDS["define_terms"]["payload"]({"terms": many}, None) == {"terms": cleaned}
 
 

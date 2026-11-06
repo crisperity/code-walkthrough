@@ -27,6 +27,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import cw_llm  # noqa: E402
+import cw_mcp  # noqa: E402
 import cw_repo  # noqa: E402
 import cw_store  # noqa: E402
 import fanout  # noqa: E402
@@ -43,7 +44,7 @@ from validate_analysis import EMPTY_NOTE_FLOOR, HUNK_PREFIX, parse_hunks, valida
 SCRIPTS_DIR = Path(__file__).resolve().parent
 SKILL_DIR = SCRIPTS_DIR.parent
 
-STEPS = ("capture", "split", "skeleton", "worktree", "complexity", "symdelta", "visuals",
+STEPS = ("capture", "split", "skeleton", "worktree", "complexity", "symdelta", "visuals", "glossary",
          "small", "prose", "routed", "comments", "threads", "prepare", "render", "run")
 
 HEAVY = threading.BoundedSemaphore(2)  # shared across every walkthrough in this process
@@ -1128,6 +1129,91 @@ def _start_visuals(d, meta, config, on_event):
     return t
 
 
+GLOSSARY_TEXT_MAX = 30_000
+
+
+def _glossary_text(analysis):
+    """Prose for the glossary prompt, capped: hunk notes go first when it runs long."""
+    parts = [analysis.get("overview"), analysis.get("verdict")]
+    parts += [g.get("why") for g in analysis.get("groups") or [] if isinstance(g, dict)]
+    notes = []
+    for f in analysis.get("files") or []:
+        if isinstance(f, dict):
+            parts.append(f.get("role"))
+            notes += [h.get("note") for h in f.get("hunks") or [] if isinstance(h, dict)]
+    text = "\n\n".join(p for p in parts if isinstance(p, str) and p.strip())[:GLOSSARY_TEXT_MAX]
+    for note in notes:
+        if isinstance(note, str) and note.strip() and len(text) + len(note) + 2 <= GLOSSARY_TEXT_MAX:
+            text += "\n\n" + note
+    return text
+
+
+def _glossary_submit_tool():
+    return {"type": "function", "function": {
+        "name": "submit_glossary",
+        "description": "Submit the glossary: project-specific terms from the page text, each with a short definition.",
+        "parameters": {"type": "object", "required": ["terms"], "properties": {
+            "terms": {"type": "array", "maxItems": cw_mcp.GLOSSARY_MAX, "items": {
+                "type": "object", "required": ["term", "def"], "properties": {
+                    "term": {"type": "string", "maxLength": cw_mcp.TERM_MAX},
+                    "def": {"type": "string", "maxLength": cw_mcp.TERM_DEF_MAX}}}}}}}}
+
+
+def _run_glossary(d, meta, config, on_event, force=False):
+    """Picks the walkthrough's hover glossary from the prose into glossary.json. Never raises and never
+    fails the run: a failure marks the `glossary` step failed and the page has no glossary."""
+    out = d / "glossary.json"
+    if out.exists() and not force:
+        _emit_step(d, on_event, "glossary", "skipped")
+        return False
+    try:
+        text = _glossary_text(cw_store.read_json(d / "analysis.json", default=None) or {})
+        if not text:
+            _emit_step(d, on_event, "glossary", "skipped")
+            return False
+        profile = cw_store.role_profile(config, "prose", agent=_agent_of(d))
+        if profile is None:
+            _emit_step(d, on_event, "glossary", "failed", error="no profile for role prose")
+            return False
+        _emit_step(d, on_event, "glossary", "running")
+        messages = [{"role": "system", "content": (SKILL_DIR / "prompts" / "glossary.md").read_text()
+                     + DELIVERY_SUFFIX.format(tool="submit_glossary")},
+                    {"role": "user", "content": f"Target: {meta['target']}\n\nPage text:\n\n{text}"}]
+        state = {}
+
+        def handler(args):
+            raw = args.get("terms") if isinstance(args, dict) else None
+            state["raw"] = len(raw) if isinstance(raw, list) else 0
+            state["terms"] = cw_mcp.clean_terms(raw, text, cap=cw_mcp.GLOSSARY_MAX)
+            return cw_llm.Done({"ok": True})
+
+        error = None
+        try:
+            cw_llm.run_tools(profile, messages, [_glossary_submit_tool()], {"submit_glossary": handler},
+                             max_rounds=3, max_tokens=config["max_conversation_tokens"],
+                             timeout=config["timeout_s"], on_usage=_make_on_usage(d, "prose", on_event, config))
+        except Exception as e:
+            error = str(e)
+        finally:
+            _write_transcript(d, "glossary", profile, messages, result="terms" in state, error=error)
+        if "terms" not in state:
+            raise RuntimeError(error or "nothing submitted")
+        dropped = state["raw"] - len(state["terms"])
+        cw_store.write_json(out, state["terms"])
+        _emit_step(d, on_event, "glossary", "ok",
+                   **({"lines": [f"glossary: {dropped} dropped"]} if dropped else {}))
+        return True
+    except Exception as e:
+        _emit_step(d, on_event, "glossary", "failed", error=str(e), remedy=getattr(e, "remedy", None))
+        return False
+
+
+def _start_glossary(d, meta, config, on_event):
+    t = threading.Thread(target=_run_glossary, args=(d, meta, config, on_event), daemon=True)
+    t.start()
+    return t
+
+
 def _route_and_finalize(d, meta, config, on_event, batch_count, manifest, other_lines):
     raw_diff = (d / "raw.diff").read_text(errors="replace")
     _, diff_files = parse_hunks(raw_diff)
@@ -1727,7 +1813,7 @@ def _full_clean(d, old_meta, toplevel):
     for name in ("batches", "partial"):
         _rm(d / name)
     for name in ("prose.json", "analysis.json", "analysis.partial.json", "symdelta.json", "symdelta.model.json", "visuals.json",
-                 "complexity.json", "links.json", "pipeline.json",
+                 "glossary.json", "complexity.json", "links.json", "pipeline.json",
                  "raw.diff", "numstat.tsv", "partial.html"):
         _rm(d / name)
     for path in d.glob("section-*.html"):
@@ -1840,7 +1926,7 @@ def prepare_walkthrough(params, is_running=None, edit_guard=None):
     retry = not fresh and old_meta and old_meta.get("sig") == sig and old_meta.get("status") in ("failed", "interrupted")
     with contextlib.nullcontext() if retry else edit_guard(d):
         if retry:
-            for name in ("prose.json", "analysis.json", "visuals.json", "pipeline.json"):
+            for name in ("prose.json", "analysis.json", "visuals.json", "glossary.json", "pipeline.json"):
                 _rm(d / name)
             meta = dict(old_meta)
         else:
@@ -2010,7 +2096,7 @@ def run(d, on_event=None):
     on_event = on_event or (lambda ev, data: None)
     renderer = _PartialRenderer(d, on_event)
     _set_renderer(d, renderer)
-    visuals_thread = None
+    aux_threads = []
     try:
         config = cw_store.load_config()
         meta = cw_store.read_meta(d) or {}
@@ -2026,6 +2112,7 @@ def run(d, on_event=None):
             meta = cw_store.update_meta(d, lambda m: m.update({"refresh": False}))
             renderer.wait_idle(timeout=60)
             _run_visuals(d, meta, config, on_event)
+            _run_glossary(d, meta, config, on_event)
             hint_thread.join(timeout=20)
             final_ok = _final_build(d, meta, config, on_event)
             return "done" if final_ok else "failed"
@@ -2066,7 +2153,7 @@ def run(d, on_event=None):
             if not small_ok:
                 _fail_run_from_step(d, on_event, "small", "small route failed the fragment gate")
                 return "failed"
-            visuals_thread = _start_visuals(d, meta, config, on_event)
+            aux_threads = [_start_visuals(d, meta, config, on_event), _start_glossary(d, meta, config, on_event)]
         else:
             results = {}
             lock = threading.Lock()
@@ -2105,10 +2192,11 @@ def run(d, on_event=None):
                 if not ok:
                     _fail_run(d, on_event, None, gate=lines)
                     return "failed"
-            visuals_thread = _start_visuals(d, meta, config, on_event)
+            aux_threads = [_start_visuals(d, meta, config, on_event), _start_glossary(d, meta, config, on_event)]
 
         renderer.wait_idle(timeout=60)
-        visuals_thread.join()
+        for t in aux_threads:
+            t.join()
         hint_thread.join(timeout=20)
         meta = cw_store.read_meta(d) or meta
         final_ok = _final_build(d, meta, config, on_event)
@@ -2119,8 +2207,8 @@ def run(d, on_event=None):
         _emit_step(d, on_event, "run", "failed", error=str(e), remedy=remedy)
         return "failed"
     finally:
-        if visuals_thread:
-            visuals_thread.join()
+        for t in aux_threads:
+            t.join()
         renderer.closed = True
         renderer.wait_idle(timeout=60)
         with _RENDERERS_LOCK:

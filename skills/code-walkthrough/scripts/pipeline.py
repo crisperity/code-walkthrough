@@ -216,10 +216,11 @@ def _symdelta_file(d):
 
 
 def _optional_data_flags(d, ticket_hint=None):
-    """render.py's --symdelta/--complexity/--visuals/--context for whichever of the files exist, plus
+    """render.py's --symdelta/--complexity/--visuals/--glossary/--context for whichever of the files exist, plus
     --ticket-hint when the caller has one. Passing --complexity also turns on the Complexity fact in the facts strip."""
     flags = [arg for flag, path in (("--symdelta", _symdelta_file(d)), ("--complexity", d / "complexity.json"),
-                                    ("--visuals", d / "visuals.json"), ("--context", d / "context.json"))
+                                    ("--visuals", d / "visuals.json"), ("--glossary", d / "glossary.json"),
+                                    ("--context", d / "context.json"))
              if path.exists() for arg in (flag, str(path))]
     return flags + (["--ticket-hint", ticket_hint] if ticket_hint else [])
 

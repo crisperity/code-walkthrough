@@ -253,6 +253,7 @@ OUTCOME_TOOLS.append({
 
 
 TERMS_MAX, TERM_MAX, TERM_DEF_MAX = 5, 40, 240
+GLOSSARY_MAX = 12
 
 OUTCOME_TOOLS.append({
     "name": "define_terms",
@@ -275,8 +276,8 @@ def _term_re(term):
     return re.compile(r"(?<![\w])" + r"\s+".join(map(re.escape, term.split())) + r"(?!\w)", re.IGNORECASE)
 
 
-def clean_terms(raw, text=None):
-    """Valid {term, def} pairs, deduplicated case-insensitively, at most TERMS_MAX. With `text`, drops
+def clean_terms(raw, text=None, cap=TERMS_MAX):
+    """Valid {term, def} pairs, deduplicated case-insensitively, at most `cap`. With `text`, drops
     terms that do not occur in it as whole words outside code spans and fences (the page does not
     mark those)."""
     if text is not None:
@@ -292,7 +293,7 @@ def clean_terms(raw, text=None):
             continue
         seen.add(term.lower())
         out.append({"term": term, "def": definition[:TERM_DEF_MAX]})
-        if len(out) == TERMS_MAX:
+        if len(out) == cap:
             break
     return out
 

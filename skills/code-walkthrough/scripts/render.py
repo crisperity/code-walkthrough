@@ -32,12 +32,13 @@ import math
 import re
 import sys
 from datetime import datetime
-from html import escape
+from html import escape, unescape
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from complexity import summary_line  # noqa: E402  one owner for wording a complexity delta
 from sections import _MAX_BUTTON_HTML, _codeify, render_symbols  # noqa: E402  one owner for these
+import cw_mcp  # noqa: E402  clean_terms, the single trust boundary for glossary terms
 import visuals as visuals_mod  # noqa: E402  the sanitiser, the single trust boundary for pictures
 from validate_analysis import parse_hunks  # noqa: E402  one owner for diff parsing
 from walkthrough import story  # noqa: E402  one owner for the group order
@@ -45,6 +46,12 @@ from walkthrough import story  # noqa: E402  one owner for the group order
 TITLE_PLACEHOLDER = "<!-- DIFF_TITLE -->"
 CONTENT_PLACEHOLDER = "<!-- DIFF_CONTENT -->"
 STATE_PLACEHOLDER = "<!-- HR_STATE -->"
+LEAD_SENTENCE = re.compile(r"\s*(.+?(?<!e\.g)(?<!i\.e)(?<!etc)(?<!vs)[.!?])(?=\s+[A-Z`\"'(\d]|\s*$)", re.S)
+BULLET_MARK = re.compile(r"^\s*-\s+")
+BULLET_LINE = re.compile(BULLET_MARK.pattern, re.M)
+VIEW_TOGGLE_HTML = ('<div class="cw-viewtoggle" role="group" aria-label="Detail level">'
+                    '<button type="button" data-cw-view="general">Overview</button>'
+                    '<button type="button" data-cw-view="detailed">Detailed</button></div>')
 PICTURE_MARKER = re.compile(r"<!-- cw-picture:(\d+) -->")
 
 
@@ -270,8 +277,9 @@ def concepts_html(concepts, explain):
                if isinstance(html, str) and html else "")
         rows = "".join(f'<div class="cw-concept-{k}"><dt>{label}</dt><dd>{_html_prose(c[k])}</dd></div>'
                        for k, label in _CONCEPT_ROWS.items())
-        cards.append(f'<article class="cw-concept"><p class="cw-concept-title">{escape(title)}</p>'
-                     f'{pic}<dl class="cw-concept-ba">{rows}</dl></article>')
+        cards.append(f'<article class="cw-concept">{pic}<p class="cw-concept-title">{escape(title)}</p>'
+                     f'<details class="cw-concept-more"{"" if pic else " open"}><summary>Before, after, why</summary>'
+                     f'<dl class="cw-concept-ba">{rows}</dl></details></article>')
     if not cards:
         return ""
     return (f'<section class="cw-concepts" id="cw-concepts" aria-labelledby="cw-concepts-h">'
@@ -437,7 +445,7 @@ def context_html(ctx, files, current_head="", building=False, hint=None):
 
 def render_html(analysis, files, template, walkthrough="", links=None, title=None,
                 now=None, complexity=None, state=None, explain=False, order=None,
-                symdelta=None, visuals=None, context=None, building=False, ticket_hint=None):
+                symdelta=None, visuals=None, context=None, building=False, ticket_hint=None, glossary=None):
     target = analysis.get("target") or ""
     count, added, removed, net = counts_from(files)
     sign = "+" if net >= 0 else ""
@@ -469,20 +477,36 @@ def render_html(analysis, files, template, walkthrough="", links=None, title=Non
         body.append(f'  <div class="fact"><b>{label}</b><span class="cw-skel-line" aria-busy="true"></span></div>')
     body.append("</div>")
 
+    if walkthrough.strip() and state is not None:
+        body.append(VIEW_TOGGLE_HTML)
+
     if not explain:
         body.append(context_html(context, files, (links or {}).get("head_sha", ""), building, ticket_hint))
 
     clean = visuals or {}
-    if concepts_block := concepts_html(clean.get("concepts"), explain):
-        body.append(concepts_block)
-
     overview = _paragraphs(analysis.get("overview"))
+    detail_only = False
+    if concepts_block := concepts_html(clean.get("concepts"), explain):
+        if overview:
+            first = overview[0]
+            bulleted = BULLET_LINE.search(first)
+            lead = None if bulleted else LEAD_SENTENCE.match(first)
+            if lead and len(lead.group(1)) <= 300:
+                lead_text = lead.group(1)
+                rest = first[lead.end():].strip()
+                overview = ([rest] if rest else []) + overview[1:]
+            else:
+                head = first.strip().splitlines()[0] if bulleted else first
+                lead_text = _clip(" ".join(BULLET_MARK.sub("", head, count=1).split()), 200)
+            body.append(f'<p class="cw-lead"><strong>{_html_prose(" ".join(lead_text.split()))}</strong></p>')
+        body.append(concepts_block)
+        detail_only = True
     if overview:
         # One heading in both modes: the topic a cold reader needs is the same shape whether
         # it is a change ("what changed") or an area ("what this is"), so the two headings this
         # used to swap between said nothing the field itself didn't already carry.
-        body.append("<h2>Overview</h2>")
-        body += [_block_html(block) for block in overview]
+        text = "<h2>Overview</h2>\n" + "\n".join(_block_html(block) for block in overview)
+        body.append(f'<div class="cw-ov-detail">{text}</div>' if detail_only else text)
 
     all_symbols = render_symbols(symdelta, explain, paths=order if explain else (), inline=True) \
         if symdelta else ""
@@ -514,8 +538,14 @@ def render_html(analysis, files, template, walkthrough="", links=None, title=Non
         group_pictures = clean.get("groups") or {}
 
         def picture(match):
-            html = group_pictures.get(int(match.group(1)))
-            return f'<div class="cw-vis cw-vis-group">{html}</div>' if html else ""
+            idx = int(match.group(1))
+            html = group_pictures.get(idx)
+            if not html:
+                return ""
+            heads = re.findall(r'<h3 class="wt-group">(.*?)(?: <span class="wt-count">|</h3>)', walkthrough[:match.start()])
+            cap = _clip(unescape(re.sub(r"<[^>]+>", "", heads[-1])), 60) if heads else ""
+            return (f'<figure class="cw-vis cw-vis-group">{html}'
+                    f'{f"<figcaption>{escape(cap)}</figcaption>" if cap else ""}</figure>')
 
         body.append(PICTURE_MARKER.sub(picture, walkthrough.rstrip("\n")))
 
@@ -528,15 +558,18 @@ def render_html(analysis, files, template, walkthrough="", links=None, title=Non
 
     page = template.replace(TITLE_PLACEHOLDER, escape(heading))
     page = page.replace(CONTENT_PLACEHOLDER, "\n".join(body))
+    scripts = ""
     if state is not None:
         # \u003c is a JSON string escape, not an HTML entity -- script content is
         # never HTML-entity-decoded, and JSON.parse decodes \u003c natively, so
         # nothing has to reverse it client-side (an &lt; entity would, and would
         # also mangle a note body that already contained the literal text "&lt;").
         blob = json.dumps(state).replace("<", "\\u003c")
-        page = page.replace(STATE_PLACEHOLDER,
-                             f'<script type="application/json" id="hr-state">{blob}</script>')
-    return page
+        scripts = f'<script type="application/json" id="hr-state">{blob}</script>'
+    if glossary:
+        blob = json.dumps(glossary).replace("<", "\\u003c")
+        scripts += f'<script type="application/json" id="cw-glossary">{blob}</script>'
+    return page.replace(STATE_PLACEHOLDER, scripts) if scripts else page
 
 
 def load_visuals(path, n_groups, placed=None, ctx=None):
@@ -561,6 +594,13 @@ def load_visuals(path, n_groups, placed=None, ctx=None):
         f"visuals: {problem}" for problem in problems]
 
 
+def load_glossary(path):
+    try:
+        return cw_mcp.clean_terms(json.loads(Path(path).read_text()), cap=cw_mcp.GLOSSARY_MAX)
+    except (OSError, ValueError, RecursionError):
+        return []
+
+
 def _read(path):
     return Path(path).read_text(errors="replace") if path else ""
 
@@ -575,6 +615,7 @@ def main():
     parser.add_argument("--complexity", help="complexity.json, for the complexity fact")
     parser.add_argument("--symdelta", help="symdelta.json, for the All symbols graph")
     parser.add_argument("--visuals", help="visuals.json, re-checked here before anything is inlined")
+    parser.add_argument("--glossary", help="glossary.json, re-checked here before it is embedded for hover definitions")
     parser.add_argument("--context", help="context.json, re-checked here before anything is inlined")
     parser.add_argument("--ticket-hint", help="JSON {key, found_in} the daemon detected, for the Context skeleton")
     parser.add_argument("--template", required=True, help="the page template")
@@ -618,6 +659,7 @@ def main():
         _read(args.walkthrough), links, args.title,
         complexity=complexity, state=state, explain=args.explain, order=order,
         symdelta=symdelta, visuals=clean, context=context, building=args.building, ticket_hint=hint,
+        glossary=load_glossary(args.glossary) if args.glossary else None,
     ))
     return 0
 

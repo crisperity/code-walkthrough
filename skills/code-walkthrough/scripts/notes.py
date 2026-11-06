@@ -222,6 +222,14 @@ mutation SubmitReview($reviewId: ID!, $event: PullRequestReviewEvent!, $body: St
 }
 """
 
+DELETE_REVIEW_MUTATION = """
+mutation DeleteReview($reviewId: ID!) {
+  deletePullRequestReview(input: {pullRequestReviewId: $reviewId}) {
+    pullRequestReview { id }
+  }
+}
+"""
+
 RESOLVE_THREAD_MUTATION = """
 mutation ResolveThread($id: ID!) {
   resolveReviewThread(input: {threadId: $id}) { thread { id isResolved } }
@@ -838,15 +846,15 @@ def _lookup_pending_review(state, gh_run):
 
 
 def _ensure_pending_review(state, gh_run):
-    """The pending review's node id, opening one only when none is found. deliver_note's two
-    callers (a new thread, a reply) both want this open-if-missing behaviour; submit_review
-    does not -- see submit_review.
+    """(pending review node id, whether this call opened it), opening one only when none is
+    found. deliver_note's two callers (a new thread, a reply) both want this open-if-missing
+    behaviour; submit_review does not -- see submit_review.
     """
     review_id, pull_request_id = _lookup_pending_review(state, gh_run)
     if review_id is not None:
-        return review_id
+        return review_id, False
     resp = gh_run(OPEN_REVIEW_MUTATION, {"pullRequestId": pull_request_id})
-    return resp["data"]["addPullRequestReview"]["pullRequestReview"]["id"]
+    return resp["data"]["addPullRequestReview"]["pullRequestReview"]["id"], True
 
 
 def deliver_note(state, note, diff_text, gh_run):
@@ -861,7 +869,7 @@ def deliver_note(state, note, diff_text, gh_run):
         if parent is None or not parent.get("gh_node_id"):
             raise RuntimeError(f"reply target {reply_to!r} has not been delivered yet")
 
-    review_id = _ensure_pending_review(state, gh_run)
+    review_id, _ = _ensure_pending_review(state, gh_run)
     comment = None
 
     if parent is not None:
@@ -955,17 +963,37 @@ def publish_note(state, note, diff_text, gh_rest):
     return note
 
 
-def submit_review(state, event, body, gh_run):
-    """Submit the existing pending review -- never opens one, unlike deliver_note's
+def submit_review(state, event, body, gh_run, open_if_missing=False):
+    """Submit the existing pending review -- never opens one by default, unlike deliver_note's
     _ensure_pending_review. Submitting with nothing pending (e.g. a retry after the only
     draft already posted) would otherwise open an empty review and have GitHub reject the
-    mutation, leaving that empty review stranded on the PR.
+    mutation, leaving that empty review stranded on the PR. open_if_missing is for a
+    deliberate comment-less Approve / Request changes / summary, where the caller has
+    already checked the event and body make a valid review.
     """
     review_id, _ = _lookup_pending_review(state, gh_run)
+    created = False
+    if review_id is None and open_if_missing:
+        review_id, created = _ensure_pending_review(state, gh_run)
     if review_id is None:
         raise RuntimeError("no pending review to submit: post a comment first")
-    resp = gh_run(SUBMIT_MUTATION, {"reviewId": review_id, "event": event, "body": body})
-    return ((resp.get("data") or {}).get("submitPullRequestReview") or {}).get("pullRequestReview")
+
+    def discard():
+        if created:
+            try:
+                gh_run(DELETE_REVIEW_MUTATION, {"reviewId": review_id})
+            except Exception:
+                pass
+
+    try:
+        resp = gh_run(SUBMIT_MUTATION, {"reviewId": review_id, "event": event, "body": body})
+    except Exception:
+        discard()
+        raise
+    submitted = ((resp.get("data") or {}).get("submitPullRequestReview") or {}).get("pullRequestReview")
+    if submitted is None:
+        discard()
+    return submitted
 
 
 def reset_in_review(state):
@@ -1190,7 +1218,7 @@ def do_resolve(args):
 def do_submit(args):
     state = _load_state(args.state)
     body = Path(args.body_file).read_text()
-    review = submit_review(state, args.event, body, _gh_graphql)
+    review = submit_review(state, args.event, body, _gh_graphql, open_if_missing=getattr(args, "open", False))
     if review is None:
         raise RuntimeError("GitHub rejected the submission: submitPullRequestReview returned null")
     for note in state.get("notes", []):
@@ -1283,6 +1311,8 @@ def main():
     submit_parser.add_argument("--event", required=True,
                                 choices=["COMMENT", "APPROVE", "REQUEST_CHANGES"])
     submit_parser.add_argument("--body-file", required=True)
+    submit_parser.add_argument("--open", action="store_true",
+                               help="open a pending review first when none exists (comment-less verdict)")
     submit_parser.set_defaults(func=do_submit)
 
     review_info_parser = sub.add_parser("review-info")

@@ -905,6 +905,65 @@ def test_submit_review_raises_and_never_mutates_when_no_review_is_pending():
         raise AssertionError("expected a RuntimeError")
 
 
+def test_submit_review_opens_a_review_first_only_when_asked_to():
+    state = {"meta": {"repo": "o/r", "pr": 1}}
+    calls = []
+
+    def gh_run(query, variables):
+        calls.append(variables)
+        if "PendingReview" in query:
+            return {"data": {"repository": {"pullRequest": {"id": "PR_node", "reviews": {"nodes": []}}}}}
+        if "OpenReview" in query:
+            return {"data": {"addPullRequestReview": {"pullRequestReview": {"id": "R_new"}}}}
+        return {"data": {"submitPullRequestReview": {"pullRequestReview": {"id": "R_new"}}}}
+
+    assert submit_review(state, "APPROVE", "", gh_run, open_if_missing=True) == {"id": "R_new"}
+    assert calls[-1] == {"reviewId": "R_new", "event": "APPROVE", "body": ""}
+
+
+@pytest.mark.parametrize("fail", ["raise", "null"])
+def test_submit_review_discards_the_review_it_opened_when_the_submit_fails(fail):
+    state = {"meta": {"repo": "o/r", "pr": 1}}
+    ops = []
+
+    def gh_run(query, variables):
+        ops.append(next(w for w in ("PendingReview", "OpenReview", "SubmitReview", "DeleteReview") if w in query))
+        if ops[-1] == "PendingReview":
+            return {"data": {"repository": {"pullRequest": {"id": "PR_node", "reviews": {"nodes": []}}}}}
+        if ops[-1] == "OpenReview":
+            return {"data": {"addPullRequestReview": {"pullRequestReview": {"id": "R_new"}}}}
+        if ops[-1] == "SubmitReview":
+            if fail == "raise":
+                raise RuntimeError("own PR")
+            return {"data": {"submitPullRequestReview": None}}
+        return {"data": {}}
+
+    if fail == "raise":
+        with pytest.raises(RuntimeError):
+            submit_review(state, "APPROVE", "", gh_run, open_if_missing=True)
+    else:
+        assert submit_review(state, "APPROVE", "", gh_run, open_if_missing=True) is None
+    assert ops[-1] == "DeleteReview"
+
+
+def test_submit_review_keeps_a_pending_review_that_appeared_between_lookup_and_open():
+    state = {"meta": {"repo": "o/r", "pr": 1}}
+    ops = []
+    lookups = []
+
+    def gh_run(query, variables):
+        ops.append(next(w for w in ("PendingReview", "OpenReview", "SubmitReview", "DeleteReview") if w in query))
+        if ops[-1] == "PendingReview":
+            lookups.append(1)
+            nodes = [] if len(lookups) == 1 else [{"id": "R_theirs"}]
+            return {"data": {"repository": {"pullRequest": {"id": "PR_node", "reviews": {"nodes": nodes}}}}}
+        raise RuntimeError("own PR")
+
+    with pytest.raises(RuntimeError):
+        submit_review(state, "APPROVE", "", gh_run, open_if_missing=True)
+    assert "OpenReview" not in ops and "DeleteReview" not in ops
+
+
 def test_submit_cli_prints_one_clean_stderr_line_and_exits_non_zero_with_nothing_pending():
     # Regression (PR #22): the CLI used to let this RuntimeError escape as a Python traceback,
     # whose tail is what cw_server's _route_post shows the page (result.stderr.strip()[-500:]).
