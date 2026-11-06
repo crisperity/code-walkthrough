@@ -409,15 +409,20 @@
     padding:8px 13px;font-size:var(--fs-xs);color:var(--muted);opacity:0;
     transition:opacity .25s ease;pointer-events:none;z-index:30}
   .vd-nav-toast.on{opacity:1}
-  #cw-live-banner{position:fixed;top:0;left:0;right:0;z-index:50;
-    background:var(--panel);border-bottom:1px solid var(--border);
-    padding:6px 14px;font-size:var(--fs-xs);color:var(--muted);
-    font-family:var(--mono);text-align:center}
+  #cw-live-banner{position:relative;display:flex;align-items:center;padding:0 10px;
+    font:var(--fs-xs) var(--mono);color:var(--muted)}
+  #cw-live-banner>summary{display:flex;align-items:center;justify-content:center;min-width:20px;height:38px;cursor:pointer;white-space:nowrap;list-style:none}
+  #cw-live-banner>summary::-webkit-details-marker{display:none}
+  #cw-live-banner>summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:8px}
+  #cw-live-banner .cw-live-dot{width:8px;height:8px;border-radius:50%;background:var(--green)}
   #cw-live-banner.failed{color:var(--red)}
-  #cw-live-reload{position:fixed;left:16px;bottom:16px;z-index:40;
-    display:inline-flex;align-items:center;height:38px;padding:0 14px;white-space:nowrap;
+  #cw-live-banner.failed .cw-live-dot{background:var(--red)}
+  .cw-live-body{position:absolute;right:0;bottom:calc(100% + 10px);z-index:1;width:max-content;max-width:min(420px,calc(100vw - 32px));
+    padding:8px 12px;background:var(--panel);border:1px solid var(--border);border-radius:8px;
+    box-shadow:0 6px 20px rgba(0,0,0,.35);white-space:normal;overflow-wrap:anywhere}
+  #cw-live-reload{display:inline-flex;align-items:center;height:30px;padding:0 12px;white-space:nowrap;
     background:var(--panel2);border:1px solid var(--accent);color:var(--text);border-radius:999px;
-    font:600 var(--fs-sm) system-ui;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.35)}
+    font:600 var(--fs-sm) system-ui;cursor:pointer}
   #cw-live-reload:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   /* Brief highlight so "Go to file" is visible arriving at the hunk, not just landing on it. */
   details.hunk.vd-flash{border-color:var(--accent)}
@@ -646,8 +651,12 @@
     border:1px solid var(--border);border-left:3px solid var(--yellow);border-radius:8px;
     padding:10px 16px;font-size:var(--fs-sm);color:var(--text)}
 
-  #cw-dock{position:fixed;right:16px;bottom:16px;z-index:40;
-    display:flex}
+  #cw-tray{position:fixed;right:16px;bottom:16px;z-index:41;display:flex;align-items:center;gap:6px;padding:4px;
+    background:var(--panel);border:1px solid var(--border);border-radius:999px;
+    box-shadow:0 6px 20px rgba(0,0,0,.35);max-width:calc(100vw - 32px)}
+  #cw-tray:not(:has(>:not([hidden]))){display:none}
+  #cw-tray>*+*{border-left:1px solid var(--border);padding-left:6px}
+  #cw-dock{display:flex}
   #cw-dock[hidden]{display:none}
   .cw-skel{position:relative;overflow:hidden;margin:12px 0;padding:12px 16px;
     border:1px dashed var(--border);border-radius:8px;color:var(--muted);font-size:var(--fs-sm)}
@@ -664,7 +673,7 @@
   #hr-comments-btn{display:inline-flex;align-items:center;gap:8px;height:38px;padding:0 14px;white-space:nowrap;
     background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:999px;
     font:600 var(--fs-sm) system-ui;cursor:pointer;user-select:none;-webkit-user-select:none;
-    box-shadow:0 6px 20px rgba(0,0,0,.35);transition:transform .15s,border-color .15s}
+    transition:transform .15s,border-color .15s}
   #hr-comments-btn:hover{border-color:var(--accent)}
   #hr-comments-btn:active{transform:scale(.97)}
   #hr-comments-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -817,7 +826,7 @@
   .cw-thread button:focus-visible,.cw-compose button:focus-visible,
   .cw-compose textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   :root{--cw-panel-w:clamp(360px,34vw,560px)}
-  /* above #cw-live-banner (z 50); the drafts bar (z 45) stays below */
+  /* above the tray (z 41); the drafts bar (z 45) stays below */
   #cw-panel{position:fixed;top:0;right:0;bottom:0;z-index:51;width:var(--cw-panel-w);
     display:flex;flex-direction:column;box-sizing:border-box;background:var(--panel);color:var(--text);
     border-left:1px solid var(--border);box-shadow:-8px 0 24px rgba(0,0,0,.35)}
@@ -864,7 +873,7 @@
   #cw-panel-compose{flex:none;min-width:0}
   #cw-panel .cw-thread{margin:0;padding:0;border-left:0;background:none}
   @media (min-width:601px) and (pointer:fine){
-    .cw-panel-open #cw-dock{right:calc(var(--cw-panel-w) + 16px)}
+    .cw-panel-open #cw-tray{right:calc(var(--cw-panel-w) + 16px)}
     .cw-panel-open #cw-toast{left:calc(50% - var(--cw-panel-w)/2)}
   }
   @media (min-width:1100px) and (pointer:fine){
@@ -884,7 +893,7 @@
     #cw-panel-grab::before{content:'';width:36px;height:4px;border-radius:2px;background:var(--border)}
     #cw-panel[data-sheet="collapsed"] #cw-panel-grab{height:56px}
     #cw-panel[data-sheet="expanded"] .cw-grab-text{display:none}
-    .cw-panel-open #cw-dock{display:none}
+    .cw-panel-open #cw-tray{display:none}
   }
   .cw-thread,.cw-compose{display:block;box-sizing:border-box;max-width:100%;margin:6px 0;
     padding:8px 10px;border-left:3px solid var(--purple);
@@ -1208,16 +1217,26 @@
   .cw-gchip[aria-pressed=true].ok{border-color:var(--green);color:var(--green)}
   .cw-gchip[aria-pressed=true].fix{border-color:var(--yellow);color:var(--yellow)}
   #cw-bar.cw-sug-rc [data-ev=REQUEST_CHANGES],#cw-bar.cw-sug-ok [data-ev=APPROVE]{background:var(--accent);color:var(--bg);border-color:var(--accent)}
-  #cw-bar{position:fixed;left:0;right:0;bottom:0;z-index:41;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;
-    padding:8px 16px calc(8px + env(safe-area-inset-bottom));background:var(--panel);border-top:1px solid var(--border)}
-  #cw-bar[hidden],.cw-panel-open #cw-bar,.cw-typing #cw-bar{display:none}
-  #cw-bar-count{color:var(--muted);font-size:var(--fs-sm)}
-  #cw-bar-btns{display:flex;flex-wrap:wrap;gap:8px}
+  #cw-bar{position:relative;display:flex;align-items:center}
+  #cw-bar[hidden],.cw-panel-open #cw-bar{display:none}
+  .cw-typing #cw-tray{visibility:hidden;pointer-events:none}
+  #cw-bar-toggle{display:inline-flex;align-items:center;gap:4px;height:38px;padding:0 14px;white-space:nowrap;
+    background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:999px;
+    font:600 var(--fs-sm) system-ui;cursor:pointer}
+  #cw-bar-toggle:hover,#cw-bar-toggle[aria-expanded=true]{border-color:var(--accent)}
+  #cw-bar-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  #cw-bar.cw-sug-ok #cw-bar-toggle{border-color:var(--green)}
+  #cw-bar.cw-sug-rc #cw-bar-toggle{border-color:var(--red)}
+  #cw-bar-count{color:var(--muted);font-weight:400}
+  #cw-bar-btns{position:absolute;right:0;bottom:calc(100% + 10px);z-index:1;width:230px;display:flex;flex-direction:column;gap:8px;
+    padding:8px;background:var(--panel);border:1px solid var(--border);border-radius:12px;box-shadow:0 6px 20px rgba(0,0,0,.35)}
+  #cw-bar-btns[hidden]{display:none}
+  #cw-bar-btns button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   #cw-bar-btns button{min-height:40px;padding:6px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:inherit;font:inherit;cursor:pointer}
   #cw-bar-btns [data-ev=APPROVE]{border-color:var(--green);color:var(--green)}
   #cw-bar-btns [data-ev=REQUEST_CHANGES]{border-color:var(--red);color:var(--red)}
+  body:has(#cw-tray>:not([hidden])) #plan-content{padding-bottom:88px}
   body.cw-has-bar #plan-content{padding-bottom:88px}
-  body.cw-has-bar #cw-dock{bottom:72px}
 
   /* First-glance concepts (render.py concepts_html): a card per idea, picture then Before/After/Why. */
   .cw-concept{margin:12px 0;padding:12px;background:var(--panel);border:1px solid var(--border);border-radius:10px}
@@ -1329,8 +1348,7 @@
     .vd-level-toggle{min-height:44px;padding:10px 14px}
     details.hunk>summary{min-height:44px}
     #cw-wrap-toggle{min-height:44px;padding:10px 14px}
-    #hr-comments-btn,#cw-live-reload{height:44px}
-    .cw-typing #cw-dock{visibility:hidden;pointer-events:none}
+    #hr-comments-btn,#cw-live-reload,#cw-bar-toggle{height:44px}
     #hr-comments-close{width:44px;height:44px;font-size:16px}
     #hr-comments-list button{min-height:44px}
     .cw-dc button{min-height:44px;padding:10px 14px}
@@ -1368,6 +1386,14 @@
     .chip-fix{padding:13px 7px;margin:-11px 0}
   }
 
+  @media (max-width:600px),(pointer:coarse){
+    body.cw-has-bar #cw-selbar{bottom:76px}
+    body.cw-has-bar #cw-toast{bottom:76px}
+    #cw-tray{left:8px;right:8px;bottom:calc(8px + env(safe-area-inset-bottom));justify-content:flex-end;max-width:none}
+    #cw-bar,#cw-live-banner{position:static}
+    .cw-live-body{left:0;right:auto}
+    #cw-bar-btns{left:0;width:auto}
+  }
   @media (prefers-reduced-motion:reduce){
     *,*::before,*::after{transition-duration:.01ms!important;animation-duration:.01ms!important;
       animation-iteration-count:1!important;scroll-behavior:auto!important}
@@ -1379,7 +1405,11 @@
 
 <!-- Ahead of #plan-content in source order (fixed visual position is unchanged) so a keyboard
      user reaches this button without tabbing through every commentable diff line first. -->
-<div id="cw-dock" hidden><button type="button" id="hr-comments-btn" aria-haspopup="dialog">Comments <span class="cw-dock-badge">0</span></button></div>
+<div id="cw-tray"><div id="cw-dock" hidden><button type="button" id="hr-comments-btn" aria-haspopup="dialog">Comments <span class="cw-dock-badge">0</span></button></div>
+
+<div id="cw-bar" hidden role="region" aria-label="Review"><button type="button" id="cw-bar-toggle" aria-expanded="false" aria-controls="cw-bar-btns" aria-haspopup="true">Review<span id="cw-bar-count"></span></button>
+  <div id="cw-bar-btns" hidden><button type="button" data-ev="COMMENT">Comment</button><button type="button" data-ev="REQUEST_CHANGES">Request changes</button><button type="button" data-ev="APPROVE">Approve</button></div></div></div>
+
 <dialog id="hr-comments" aria-label="Your comments">
   <div id="hr-comments-head">
     <span>Your comments</span>
@@ -1399,9 +1429,6 @@
       aria-label="Command to paste in a terminal"></textarea>
   </div>
 </dialog>
-
-<div id="cw-bar" hidden role="region" aria-label="Review"><span id="cw-bar-count"></span>
-  <div id="cw-bar-btns"><button type="button" data-ev="COMMENT">Comment</button><button type="button" data-ev="REQUEST_CHANGES">Request changes</button><button type="button" data-ev="APPROVE">Approve</button></div></div>
 
 <div class="wrap" id="plan-content">
 <!-- DIFF_CONTENT -->
@@ -2372,8 +2399,9 @@ if(window.CW_LIVE){
     });
     const c=document.getElementById('cw-bar-count');
     const s=window.__cwGroupState();
-    if(c) c.textContent=!s.total?'':s.ok===s.total?'All '+s.total+' look good'
+    const full=!s.total?'Review':s.ok===s.total?'All '+s.total+' look good'
       :(s.ok+s.fix.length)+'/'+s.total+' checked'+(s.fix.length?' · '+s.fix.length+' needs changes':'');
+    if(c){ c.textContent=s.total?' · '+(s.ok+s.fix.length)+'/'+s.total:''; c.parentElement.title=full; }
     const bar=document.getElementById('cw-bar');
     if(bar){
       bar.classList.toggle('cw-sug-rc',s.fix.length>0);
@@ -3772,7 +3800,15 @@ if(window.CW_LIVE){
     if(bar){
       bar.hidden=!canGhCommand;
       document.body.classList.toggle('cw-has-bar',!!canGhCommand);
-      bar.querySelectorAll('[data-ev]').forEach(b=>b.addEventListener('click',()=>start(b,b.dataset.ev)));
+      const tg=$$('cw-bar-toggle'), pop=$$('cw-bar-btns');
+      const setOpen=o=>{ pop.hidden=!o; tg.setAttribute('aria-expanded',String(o)); };
+      tg.addEventListener('click',()=>setOpen(pop.hidden));
+      bar.querySelectorAll('[data-ev]').forEach(b=>b.addEventListener('click',()=>{ setOpen(false); start(b,b.dataset.ev); }));
+      document.addEventListener('click',e=>{ if(!pop.hidden&&!bar.contains(e.target)) setOpen(false); });
+      document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!pop.hidden){ e.preventDefault(); e.stopPropagation(); setOpen(false); tg.focus(); } },true);
+      new MutationObserver(()=>{ if(bar.hidden||document.documentElement.classList.contains('cw-panel-open')) setOpen(false); })
+        .observe(document.documentElement,{attributes:true,attributeFilter:['class']});
+      new MutationObserver(()=>{ if(bar.hidden) setOpen(false); }).observe(bar,{attributes:true,attributeFilter:['hidden']});
     }
 
     const plural=(n,w)=>n+' '+w+(n===1?'':'s');
@@ -3963,7 +3999,7 @@ if(window.CW_LIVE){
     dlg.addEventListener('close',()=>{
       seq++; loading=false; waiting=false;
       const o=opener&&opener.isConnected&&!opener.hidden&&!opener.disabled&&opener.offsetParent!==null?opener
-        :document.getElementById('hr-comments-btn')||document.body;
+        :(opener&&opener.closest('#cw-bar-btns')&&document.getElementById('cw-bar-toggle'))||document.getElementById('hr-comments-btn')||document.body;
       o.focus();
     });
 
@@ -6266,7 +6302,7 @@ if(window.CW_LIVE){
     const pCompose=mk('div'); pCompose.id='cw-panel-compose';
     pThread.append(pBody,pCompose);
     panel.append(grab,pHead,pAccess,pList,pThread);
-    $('cw-dock').after(panel);
+    $('cw-tray').after(panel);
 
     const resizer=mk('div'); resizer.id='cw-panel-resize'; resizer.tabIndex=0;
     resizer.setAttribute('role','separator'); resizer.setAttribute('aria-orientation','vertical');
@@ -7018,7 +7054,12 @@ armCtxHint();
 
     function ensureBanner(){
       let el=document.getElementById('cw-live-banner');
-      if(!el){ el=document.createElement('div'); el.id='cw-live-banner'; document.body.prepend(el); }
+      if(!el){
+        el=document.createElement('details'); el.id='cw-live-banner';
+        el.append(document.createElement('summary'),document.createElement('div'));
+        el.lastChild.className='cw-live-body';
+        document.getElementById('cw-tray').prepend(el);
+      }
       return el;
     }
 
@@ -7036,8 +7077,16 @@ armCtxHint();
         if(liveError) text+=' \u2014 '+liveError;
         if(liveRemedy) text+=' (remedy: '+liveRemedy+')';
       }
-      el.classList.toggle('failed',liveStatus==='failed');
-      el.textContent=text;
+      const failed=liveStatus==='failed';
+      const wasFailed=el.classList.contains('failed');
+      el.classList.toggle('failed',failed);
+      const dot=document.createElement('span'); dot.className='cw-live-dot'; dot.setAttribute('aria-hidden','true');
+      let label=liveStatus;
+      if(running) label+=' \u00b7 '+running.split('-')[0]+' '+(liveBatches.done||0)+'/'+(liveBatches.total||0);
+      el.firstChild.replaceChildren(dot);
+      el.firstChild.title=label; el.firstChild.setAttribute('aria-label','Live status: '+label);
+      el.lastChild.textContent=text;
+      if(failed&&!wasFailed) el.open=true;
       LIVE.status=liveStatus;
       paintSkeletons();
     }
@@ -7090,7 +7139,7 @@ armCtxHint();
       btn.id='cw-live-reload';
       btn.textContent='Updated, reload';
       btn.addEventListener('click',doReload);
-      document.body.appendChild(btn);
+      ensureBanner().after(btn);
     }
 
     // BOUND must list every block that load-time scripts bind to, or an in-place swap breaks it.

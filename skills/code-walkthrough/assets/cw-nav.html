@@ -428,21 +428,6 @@ function markSVG(){
   return svg;
 }
 
-function offsetBelowBanner(bar){
-  var banner=null, ro=window.ResizeObserver&&new ResizeObserver(sync);
-  function sync(){bar.style.marginTop=banner&&banner.isConnected?banner.offsetHeight+'px':'';}
-  function find(){
-    var b=document.getElementById('cw-live-banner');
-    if(b===banner) return;
-    if(ro&&banner) ro.unobserve(banner);
-    banner=b;
-    if(ro&&b) ro.observe(b);
-    sync();
-  }
-  find();
-  new MutationObserver(find).observe(document.body,{childList:true});
-}
-
 function buildHeader(nav){
   var bar=el('header','cwn-bar'), mark=el('a','cwn-mark');
   mark.appendChild(markSVG());
@@ -472,7 +457,6 @@ function buildHeader(nav){
   right.appendChild(btn);
   bar.appendChild(right);
   document.body.insertBefore(bar,document.body.firstChild);
-  offsetBelowBanner(bar);
 }
 
 function typing(t){

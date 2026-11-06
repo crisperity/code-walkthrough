@@ -1209,6 +1209,16 @@ def test_glossary_step_writes_terms_that_occur_in_the_page_text_and_drops_the_re
             assert cw_store.read_meta(d)["steps"]["glossary"]["status"] == "skipped"
 
 
+def test_glossary_step_passes_the_head_checkout_as_cwd(monkeypatch):
+    with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
+        with cw_testlib.StubLLM({}) as stub:
+            d, meta = _glossary_dir(home, tmp, stub)
+            seen = {}
+            monkeypatch.setattr(cw_llm, "run_tools", lambda *a, **k: seen.update(k))
+            cw_run._run_glossary(d, meta, cw_store.load_config(), None)
+            assert seen["cwd"] == d / "head"
+
+
 def test_glossary_failure_is_isolated_and_leaves_no_file(monkeypatch):
     with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
         with cw_testlib.StubLLM({}) as stub:
