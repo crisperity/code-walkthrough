@@ -1007,6 +1007,8 @@ def sse_read_until(sock, needle, timeout=5):
 
 def small_route_reply(body):
     """StubLLM reply for the small-route analysis call: one note per hunk of the seed."""
+    if "submit_glossary" in tool_names(body):
+        return tool_call("submit_glossary", {"terms": []})
     if "submit_visuals" in tool_names(body):
         return tool_call("submit_visuals", {"overview": {"title": "T", "nodes": [
             {"id": "a", "label": "Caller", "kind": "same", "refs": ["foo.py"]},

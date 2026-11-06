@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import cw_server  # noqa: E402
 from cw_testlib import require_node, skip  # noqa: E402
 from render import (  # noqa: E402
-    render_html, load_visuals, clean_context, clean_ticket_hint, context_html, counts_from, overview_layout, overview_svg,
+    render_html, load_glossary, load_visuals, clean_context, clean_ticket_hint, context_html, counts_from, overview_layout, overview_svg,
     visuals_mod,
     CONTENT_PLACEHOLDER, TITLE_PLACEHOLDER,
 )
@@ -326,7 +326,7 @@ def test_live_ui_never_uses_html_injection_sinks():
     assert "e.textContent=text" in mk
     assert "window.open(r.url,'_blank','noopener')" in wire_ask
     turn = _between(wire_ask, "function turnEl(", "function upsertOutcome(")
-    assert "mdEl(r.answer||'',r.terms)" in turn and "mk('p','cw-turn-a',r.answer" not in turn
+    assert "mdEl(r.answer||'',mergeTerms(r.terms))" in turn and "mk('p','cw-turn-a',r.answer" not in turn
     assert "pre-wrap" not in re.search(r"\.cw-turn-a\{[^}]*\}", template).group(0)
     assert "mdEl(n.body)" in template
 
@@ -982,7 +982,7 @@ def test_group_picture_lands_by_index_between_its_heading_and_its_files():
     out = pics({"pr": None, "groups": {1: "<p>g1</p>"}})
 
     two = out.index(">Two</h3>")
-    assert two < out.index('<div class="cw-vis cw-vis-group"><p>g1</p></div>') < out.index(">b</details>")
+    assert two < out.index('<figure class="cw-vis cw-vis-group"><p>g1</p><figcaption>Two</figcaption></figure>') < out.index(">b</details>")
     assert out.index(">a</details>") < two
 
 
@@ -1716,12 +1716,76 @@ def test_concepts_render_first_with_text_fallback_and_legacy_pages_are_unchanged
     c = {"title": "Live <config>", "before": "Constants", "after": "Read `live`", "why": "No deploy"}
     out = pics({"pr": None, "groups": {}, "concepts": [{**c, "html": "<p>pic</p>"}, {**c, "title": "Two"}]})
 
-    assert out.index('id="cw-concepts"') < out.index("<h2>Overview</h2>")
+    assert '<div class="cw-ov-detail"><h2>Overview</h2>' in out
+    assert out.index('class="cw-lead"') < out.index('id="cw-concepts"') < out.index("cw-ov-detail")
     assert out.count('<article class="cw-concept">') == 2
     assert 'Live &lt;config&gt;' in out and "<code>live</code>" in out
     assert out.count('class="cw-vis cw-concept-vis"') == 1 and "<p>pic</p>" in out
     assert "<dt>Before</dt><dd>Constants</dd>" in out and "<dt>Why</dt><dd>No deploy</dd>" in out
     assert "cw-concepts" not in pics({"pr": PR_PIC, "groups": {}})
+
+
+def test_concepts_replace_the_overview_with_a_bold_lead_and_picture_first_cards():
+    c = {"title": "Two", "before": "a", "after": "b", "why": "c"}
+    out = pics({"pr": None, "groups": {}, "concepts": [{**c, "html": "<p>pic</p>"}, c]})
+    assert '<p class="cw-lead"><strong><code>loadSession</code> now falls back to the refresh token.</strong></p>' in out
+    assert out.index("cw-ov-detail") < out.index("The title changed.") and out.count("token.") == 1
+    first =out[out.index('<article class="cw-concept">'):]
+    assert first.index("<p>pic</p>") < first.index('class="cw-concept-title"')
+    assert first.count("<details class=\"cw-concept-more\" open>") == 1
+    assert "<h2>Overview</h2>" in pics({"pr": None, "groups": {}})
+
+
+def _lead_page(overview):
+    return render_html({**ANALYSIS, "overview": overview}, parsed()[1], TEMPLATE, now=FROZEN, walkthrough=WALK,
+                       visuals={"pr": None, "groups": {}, "concepts": [{"title": "T", "before": "a", "after": "b", "why": "c"}]})
+
+
+def test_lead_never_swallows_bullets_and_the_detailed_overview_keeps_the_full_block():
+    cases = [("- one thing\n- another thing", "<strong>one thing</strong>", ["<li>one thing</li>", "<li>another thing</li>"]),
+             ("Lead line.\n- one\n- two", "<strong>Lead line.</strong>", ["Lead line.", "<li>one</li>", "<li>two</li>"]),
+             ("Word " * 70 + "ends here. Second.", "<strong>Word Word", ["ends here.", "Second."])]
+    for text, lead, kept in cases:
+        out = _lead_page(text)
+        head, detail = out.split('<div class="cw-ov-detail">', 1)
+        assert lead in head and "<li>" not in head
+        assert all(piece in detail for piece in kept)
+
+
+def test_lead_sentence_split_skips_abbreviations_and_version_numbers():
+    for text, lead in [("Use e.g. a cache, then v1.2 ships. Next.", "Use e.g. a cache, then v1.2 ships."),
+                       ("Stops at i.e. the end! More.", "Stops at i.e. the end!")]:
+        out = render_html({**ANALYSIS, "overview": text}, parsed()[1], TEMPLATE, now=FROZEN, walkthrough=WALK,
+                          visuals={"pr": None, "groups": {}, "concepts": [{"title": "T", "before": "a", "after": "b", "why": "c"}]})
+        assert f"<strong>{lead}</strong>" in out
+
+
+def test_group_pictures_get_a_caption_and_the_view_toggle_is_emitted_only_on_live_pages():
+    out = pics({"pr": None, "groups": {0: "<p>g0</p>"}}, state={"meta": {"id": "x"}})
+    assert '<figure class="cw-vis cw-vis-group"><p>g0</p><figcaption>One</figcaption></figure>' in out
+    assert out.count('data-cw-view="general"') == 1 and out.count('data-cw-view="detailed"') == 1
+    assert "data-cw-view" not in pics(walkthrough="", state={"meta": {"id": "x"}})
+    assert "data-cw-view" not in pics({"pr": None, "groups": {0: "<p>g0</p>"}})
+
+
+def test_review_bar_view_toggle_and_group_chips_ship_in_the_template_and_post_directly():
+    tpl = _real_template()
+    assert 'id="cw-bar"' in tpl and tpl.count("data-ev=\"") >= 3
+    for ev in ("COMMENT", "REQUEST_CHANGES", "APPROVE"):
+        assert f'data-ev="{ev}"' in tpl
+    assert "html.cw-general details.hunk>:not(summary)" in tpl and "'hr-groups'" in tpl and "'cw-view'" in tpl
+    assert "start(b,b.dataset.ev)" in tpl and "direct:viaBar" in tpl
+    assert "look good'" in tpl and "' checked'" in tpl and "body.cw-has-bar #plan-content{padding-bottom" in tpl
+    assert "'Looks good'" in tpl and "'Needs changes'" in tpl and "Code ok" not in tpl
+    assert "#cw-bar.cw-sug-rc [data-ev=REQUEST_CHANGES]" in tpl and "#cw-bar.cw-sug-ok [data-ev=APPROVE]" in tpl
+    assert "groupFileHunks(h).forEach(d=>{ d.open=false; })" in tpl
+    assert "': needs changes'" in tpl and "' unchecked'" in tpl and "marked Needs changes" in tpl
+    assert "hunk-viewed" not in tpl and "hr-viewed" not in tpl and "wt-viewed" not in tpl
+    assert "html.cw-general .cw-ov-detail{display:none}" in tpl
+    assert "groupMarks[keys[i]]" in tpl and "e.preventDefault(); e.stopPropagation();" in tpl
+    assert "nextGlossary!==base.glossary" in tpl
+    assert "resolve:[...pendingResolveSet],direct:viaBar" in tpl
+    assert "const groupKeys=()=>" in tpl and "t+'#'+seen[t]" in tpl and "delete groupMarks[k]);" not in tpl
 
 
 def test_load_visuals_counts_and_sanitises_concepts(tmp_path):
@@ -1747,3 +1811,19 @@ def test_legacy_visuals_json_without_concepts_loads_and_renders_unchanged(tmp_pa
 
     assert "concepts" not in clean and lines == ["visuals: 2 kept, 0 dropped"]
     assert "cw-concept" not in pics(clean)
+
+
+def test_glossary_is_embedded_escaped_and_rechecked_and_a_legacy_page_is_unchanged(tmp_path):
+    _order, files = parsed()
+    template = TEMPLATE + "<!-- HR_STATE -->"
+    terms = [{"term": "Order Book", "def": "Resting <b>orders</b>."}]
+    out = render_html(ANALYSIS, files, template, now=FROZEN, glossary=terms)
+    blob = out.split('<script type="application/json" id="cw-glossary">')[1].split("</script>")[0]
+    assert "<" not in blob and json.loads(blob) == terms
+    legacy = render_html(ANALYSIS, files, template, now=FROZEN)
+    assert "cw-glossary" not in legacy and render_html(ANALYSIS, files, template, now=FROZEN, glossary=[]) == legacy
+    path = tmp_path / "glossary.json"
+    path.write_text(json.dumps([{"term": "ok", "def": "d"}, {"term": "x"}, "junk"]))
+    assert load_glossary(path) == [{"term": "ok", "def": "d"}]
+    path.write_text("not json")
+    assert load_glossary(path) == [] and load_glossary(tmp_path / "missing.json") == []

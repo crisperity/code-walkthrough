@@ -122,6 +122,9 @@ holds copies of `analysis.json` and `raw.diff` the agent may read.
 Step `visuals` runs after the analysis and the background steps, authors the PR picture and one
 picture per group into `visuals.json`, and never fails the run: on error the step is marked
 `failed` and the page has no pictures. It skips when `visuals.json` already exists.
+Step `glossary` runs in parallel with `visuals`, picks up to 12 terms of the page text into
+`glossary.json` (hover definitions on every prose block, merged with a reply's own terms) and is
+failure-isolated the same way.
 `python3 scripts/cw_run.py visuals --dir <dir> --force` re-runs it, then `pipeline.py render`
 rebuilds the page. What a picture may contain: `references/graphs.md`.
 

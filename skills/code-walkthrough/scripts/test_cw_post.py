@@ -617,6 +617,42 @@ def test_approve_or_body_with_nothing_in_the_review_is_400_without_any_mutation(
         assert _ops(gh) == []
 
 
+@pytest.mark.parametrize("event, body", [("APPROVE", ""), ("REQUEST_CHANGES", "fix it"), ("COMMENT", "hi")])
+def test_direct_verdict_with_no_comments_opens_and_submits_a_review(done_pr, tmp_path, event, body):
+    d = done_pr.d
+    with cw_testlib.fake_gh(tmp_path, comments=[], threads=[]) as gh:
+        key, wid = d.parent.name, d.name
+        with running_daemon() as daemon:
+            pre = _preview_ok(daemon, key, wid)
+            status, raw = _post(daemon, key, wid, pre["nonce"], [], event=event, body=body, direct=True)
+            assert status == 200 and json.loads(raw)["submitted"] is True, raw
+        assert gh.count("OpenReview") == 1
+        assert next(e for e in gh.log() if e["op"] == "SubmitReview")["variables"]["event"] == event
+
+
+def test_direct_comment_verdict_without_a_summary_is_400(done_pr, tmp_path):
+    d = done_pr.d
+    with cw_testlib.fake_gh(tmp_path, comments=[], threads=[]) as gh:
+        key, wid = d.parent.name, d.name
+        with running_daemon() as daemon:
+            pre = _preview_ok(daemon, key, wid)
+            status, raw = _post(daemon, key, wid, pre["nonce"], [], event="COMMENT", direct=True)
+            assert status == 400 and "summary" in json.loads(raw)["error"]
+        assert gh.count("OpenReview") == 0
+
+
+def test_direct_comment_verdict_without_a_summary_is_fine_when_drafts_are_waiting(done_pr, tmp_path):
+    d = done_pr.d
+    with cw_testlib.fake_gh(tmp_path, comments=[], threads=[]) as gh:
+        _add_notes(d, [_note(id="n-1", body="b")])
+        key, wid = d.parent.name, d.name
+        with running_daemon() as daemon:
+            pre = _preview_ok(daemon, key, wid)
+            status, raw = _post(daemon, key, wid, pre["nonce"], [], event="COMMENT", direct=True)
+            assert status == 200 and json.loads(raw)["submitted"] is True, raw
+        assert next(e for e in gh.log() if e["op"] == "SubmitReview")["variables"]["event"] == "COMMENT"
+
+
 @pytest.mark.parametrize("event, body", [("APPROVE", ""), ("REQUEST_CHANGES", "fix it")])
 def test_approve_and_request_changes_with_drafts_submit_with_that_event(done_pr, tmp_path, event, body):
     d = done_pr.d

@@ -1169,3 +1169,86 @@ def test_visuals_pass_notes_groups_beyond_the_max():
                                      for i in range(n)})
             assert cw_run._run_visuals(d, meta, cw_store.load_config(), None)
             assert any("2 dropped" in x for x in cw_store.read_meta(d)["steps"]["visuals"]["lines"])
+
+
+def _glossary_dir(home, tmp, stub):
+    d, meta = _visuals_dir(home, tmp, stub)
+    (d / "analysis.json").write_text(json.dumps({
+        "target": "main...HEAD", "verdict": "v", "overview": "The Order Book now rebalances lazily.",
+        "groups": [{"title": "Core", "why": "Touches the settlement lane", "paths": ["foo.py"]}],
+        "files": [{"path": "foo.py", "role": "r", "hunks": [{"header": "@@", "note": "Lane drain moved"}]}]}))
+    return d, meta
+
+
+def test_glossary_text_is_capped_and_drops_hunk_notes_first():
+    big = "x" * 40_000
+    a = {"overview": "Order Book.", "verdict": "v", "groups": [{"why": "Lane"}],
+         "files": [{"role": "r", "hunks": [{"note": big}, {"note": "small note"}]}]}
+    text = cw_run._glossary_text(a)
+    assert len(text) <= cw_run.GLOSSARY_TEXT_MAX and text.startswith("Order Book.")
+    assert "Lane" in text and "xxxx" not in text and text.endswith("small note")
+
+
+def test_glossary_step_writes_terms_that_occur_in_the_page_text_and_drops_the_rest():
+    with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
+        with cw_testlib.StubLLM({}) as stub:
+            d, meta = _glossary_dir(home, tmp, stub)
+            stub.script = {"prose-m": [cw_testlib.tool_call("submit_glossary", {"terms": [
+                {"term": "order book", "def": "The resting orders."},
+                {"term": "Settlement lane", "def": "Where trades clear."},
+                {"term": "flux capacitor", "def": "Not on the page."}]})]}
+            assert cw_run._run_glossary(d, meta, cw_store.load_config(), None)
+            assert json.loads((d / "glossary.json").read_text()) == [
+                {"term": "order book", "def": "The resting orders."},
+                {"term": "Settlement lane", "def": "Where trades clear."}]
+            step = cw_store.read_meta(d)["steps"]["glossary"]
+            assert step["status"] == "ok" and step["lines"] == ["glossary: 1 dropped"]
+            assert "Touches the settlement lane" in cw_testlib.last_user_text(stub.requests[0])
+            assert (d / "runs" / "glossary-1.json").exists()
+            assert not cw_run._run_glossary(d, meta, cw_store.load_config(), None)
+            assert cw_store.read_meta(d)["steps"]["glossary"]["status"] == "skipped"
+
+
+def test_glossary_failure_is_isolated_and_leaves_no_file(monkeypatch):
+    with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
+        with cw_testlib.StubLLM({}) as stub:
+            d, meta = _glossary_dir(home, tmp, stub)
+            monkeypatch.setattr(cw_llm, "run_tools", lambda *a, **k: 1 / 0)
+            assert not cw_run._run_glossary(d, meta, cw_store.load_config(), None)
+            assert not (d / "glossary.json").exists()
+            step = cw_store.read_meta(d)["steps"]["glossary"]
+            assert step["status"] == "failed" and "division" in step["error"]
+
+
+def test_glossary_step_runs_in_parallel_with_visuals_and_a_failure_leaves_the_run_done(monkeypatch):
+    barrier, reached = threading.Barrier(2), []
+    with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
+        repo, base, head = cw_testlib.make_repo(tmp, {"foo.py": "a\nb\nc\n"}, {"foo.py": "a\nX\nc\n"})
+        with cw_testlib.StubLLM({}) as stub:
+            cw_testlib.write_config(home, {"p": stub.profile("prose-m")}, {"analysis": "p", "prose": "p"},
+                                    small_diff_lines=1000000, batch_max_lines=1)
+            d, meta, _reused = cw_run.prepare_walkthrough({
+                "repo": str(repo), "base": base, "head": head, "target": "main...HEAD", "slug": "t"})
+            seed = json.loads((d / "batches" / "fragment-1.seed.json").read_text())
+            files = [{"path": f["path"], "role": "r",
+                      "hunks": [{"header": h["header"], "note": "n"} for h in f["hunks"]]}
+                     for f in seed["files"]]
+            stub.script = {"prose-m": [cw_testlib.tool_call("submit_analysis", {
+                "files": files, "overview": "o", "verdict": "v"})]}
+
+            def fake(name):
+                def step(*a, **k):
+                    try:
+                        barrier.wait(timeout=10)
+                        reached.append(name)
+                    except threading.BrokenBarrierError:
+                        pass
+                    return False
+                return step
+
+            monkeypatch.setattr(cw_run, "_run_visuals", fake("visuals"))
+            monkeypatch.setattr(cw_run, "_run_glossary", fake("glossary"))
+            monkeypatch.setattr(cw_run, "_final_build", lambda *a, **k: True)
+            assert cw_run.run(d) == "done"
+        assert sorted(reached) == ["glossary", "visuals"]
+        assert "glossary" in cw_run.STEPS
