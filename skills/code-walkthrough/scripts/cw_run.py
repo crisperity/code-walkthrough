@@ -1191,7 +1191,8 @@ def _run_glossary(d, meta, config, on_event, force=False):
         try:
             cw_llm.run_tools(profile, messages, [_glossary_submit_tool()], {"submit_glossary": handler},
                              max_rounds=3, max_tokens=config["max_conversation_tokens"],
-                             timeout=config["timeout_s"], on_usage=_make_on_usage(d, "prose", on_event, config))
+                             timeout=config["timeout_s"], on_usage=_make_on_usage(d, "prose", on_event, config),
+                             cwd=d / "head")
         except Exception as e:
             error = str(e)
         finally:

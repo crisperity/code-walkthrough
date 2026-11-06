@@ -520,7 +520,15 @@ def test_static_dock_starts_hidden_and_only_the_static_script_reveals_it_off_liv
     template = _real_template()
     assert '<div id="cw-dock" hidden>' in template
     assert "#cw-dock[hidden]{display:none}" in template
+
     assert "details.hunk.cw-previewing .cw-skel{display:none}" in template
+
+
+def test_dock_and_review_bar_share_one_tray_and_the_panel_follows_it():
+    tpl = _real_template()
+    assert tpl.index('<div id="cw-tray">') < tpl.index('id="cw-dock"') < tpl.index('id="cw-bar"') < tpl.index('<div class="wrap" id="plan-content">')
+    assert "$('cw-tray').after(panel)" in tpl and "$('cw-dock').after(panel)" not in tpl
+    assert "document.getElementById('cw-tray').prepend(el)" in tpl
 
 
 def _dock_after_wiring(live, status="done", paint=False):
@@ -1770,6 +1778,8 @@ def test_group_pictures_get_a_caption_and_the_view_toggle_is_emitted_only_on_liv
 
 def test_review_bar_view_toggle_and_group_chips_ship_in_the_template_and_post_directly():
     tpl = _real_template()
+    assert tpl.index('</div>',tpl.index('id="cw-bar-btns"')) < tpl.index('<dialog id="hr-comments"')
+    assert 'id="cw-bar-toggle" aria-expanded="false" aria-controls="cw-bar-btns"' in tpl and 'id="cw-bar-btns" hidden' in tpl
     assert 'id="cw-bar"' in tpl and tpl.count("data-ev=\"") >= 3
     for ev in ("COMMENT", "REQUEST_CHANGES", "APPROVE"):
         assert f'data-ev="{ev}"' in tpl

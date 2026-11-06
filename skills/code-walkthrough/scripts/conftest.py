@@ -69,3 +69,8 @@ def _unwrapped_full_turns(request, monkeypatch):
     if cw_llm is not None and request.path.name != "test_cw_llm.py":
         monkeypatch.setattr(cw_llm, "confinement_available", lambda: True)
         monkeypatch.setattr(cw_llm, "confine_prefix", lambda *a, **k: [])
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_claude_config_dir(monkeypatch):
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)

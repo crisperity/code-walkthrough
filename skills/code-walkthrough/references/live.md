@@ -9,10 +9,10 @@ worker conversations are no longer this agent's own subagent spawns: every diff 
 prompt and every file a worker reads goes to whichever model backend `config.json` points at. A
 `claude-code` role runs `claude -p` under the same account and routing your own Claude Code uses,
 whether that's a subscription, an API key, or a gateway set in `settings.json`'s `env`, and counts
-against that; the page banner shows its tokens only, with no `cost_usd`. An `openai` role instead
+against that; the page's status dot (tooltip, click for the full line) shows its tokens only, with no `cost_usd`. An `openai` role instead
 bills per token against that profile's own API key: only an Ollama or vLLM instance on the same
 machine keeps that traffic local, a proxy, OpenRouter or any hosted API sees it the same as any
-other client. `walkthrough_get`'s `usage` and the page banner show the running total either way,
+other client. `walkthrough_get`'s `usage` and the page's status line show the running total either way,
 with a `cost_usd` once an openai profile carries `price_per_mtok`.
 
 ## Setup
