@@ -1274,6 +1274,65 @@ def _forge_outcomes(d, qid, records):
     path.write_text("".join(json.dumps(r) + "\n" for r in records))
 
 
+def test_answer_stores_defined_terms_that_occur_in_the_answer(monkeypatch):
+    with cw_testlib.temp_home() as home:
+        d = _claude_done(home)
+
+        def fake_turn(d, record, *a, **kw):
+            cw_ask.write_turn_anchor(d, record["qid"], record["thread_id"], dict(ANCHOR_LINE), "x")
+            ok, text = cw_mcp.accept_outcome(d, record["qid"], "define_terms", {"terms": [
+                {"term": "Order Book", "def": "Open bids."}, {"term": "ghost", "def": "Not in the answer."}]})
+            assert ok, text
+            record["answer"] = "The order book is rebuilt on start."
+
+        monkeypatch.setattr(cw_ask, "_claude_turn", fake_turn)
+        record = cw_ask.answer(d, "q1", dict(ANCHOR_LINE), "x")
+        assert record["status"] == "ok" and record["terms"] == [{"term": "Order Book", "def": "Open bids."}]
+        assert cw_ask.read_qa(d)[-1]["terms"] == record["terms"]
+
+
+def test_define_terms_second_call_is_rejected_and_discards_are_reported():
+    with cw_testlib.temp_home() as home:
+        d = _claude_done(home)
+        cw_ask.write_turn_anchor(d, "q1", "q1", dict(ANCHOR_LINE), "x")
+        ok, text = cw_mcp.accept_outcome(d, "q1", "define_terms", {"terms": [
+            {"term": "alpha", "def": "a"}, {"term": "ALPHA", "def": "dup"}, {"term": "x"}]})
+        assert ok and "kept 1 of 3" in text
+        ok, text = cw_mcp.accept_outcome(d, "q1", "define_terms", {"terms": [{"term": "beta", "def": "b"}]})
+        assert not ok and "already" in text
+
+
+def test_failed_or_cancelled_turn_stores_no_terms(monkeypatch):
+    with cw_testlib.temp_home() as home:
+        d = _claude_done(home)
+
+        def fake_turn(d, record, *a, **kw):
+            cw_ask.write_turn_anchor(d, record["qid"], record["thread_id"], dict(ANCHOR_LINE), "x")
+            cw_mcp.accept_outcome(d, record["qid"], "define_terms", {"terms": [{"term": "alpha", "def": "a"}]})
+            record["answer"] = "alpha is here"
+            raise cw_store.CWError("boom")
+
+        monkeypatch.setattr(cw_ask, "_claude_turn", fake_turn)
+        record = cw_ask.answer(d, "q1", dict(ANCHOR_LINE), "x")
+        assert record["status"] == "error" and "terms" not in record
+
+
+def test_sweep_drops_forged_define_terms():
+    with cw_testlib.temp_home() as home:
+        d = _claude_done(home)
+        cw_ask.write_turn_anchor(d, "q1", "q1", cw_ask.validate_anchor(dict(ANCHOR_LINE)), "x", "page")
+        _forge_outcomes(d, "q1", [{"oid": "o-t1", "name": "define_terms", "arguments": {"terms": "nope"}}])
+        cw_ask.sweep_outcomes(d, "q1", "q1")
+        assert cw_ask.read_outcomes(d) == []
+
+
+def test_answer_without_defined_terms_has_no_terms_key(monkeypatch):
+    with cw_testlib.temp_home() as home:
+        d = _claude_done(home)
+        monkeypatch.setattr(cw_ask, "_claude_turn", lambda d, record, *a, **kw: record.update(answer="plain"))
+        assert "terms" not in cw_ask.answer(d, "q1", dict(ANCHOR_LINE), "x")
+
+
 def test_sweep_drops_forged_outcome_records():
     with cw_testlib.temp_home() as home:
         d = _claude_done(home)

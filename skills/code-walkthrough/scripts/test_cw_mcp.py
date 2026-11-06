@@ -280,7 +280,8 @@ def test_outcomes_server_accepts_and_rejects():
         rpc = _Rpc("outcomes", "--dir", str(d), "--qid", "q1")
         try:
             assert [t["name"] for t in rpc.call("tools/list")["result"]["tools"]] == [
-                "propose_resolve", "propose_page_edit", "propose_github_draft", "propose_task", "post_draft_comments"]
+                "propose_resolve", "propose_page_edit", "define_terms", "propose_github_draft", "propose_task",
+            "post_draft_comments"]
             rpc.proc.stdin.write("garbage{\n")
             rpc.proc.stdin.flush()
             assert rpc.call("ping")["result"] == {}
@@ -301,8 +302,9 @@ def test_outcomes_server_accepts_and_rejects():
 
 
 def test_outcome_server_lists_tools_by_mode():
-    review = ["propose_resolve", "propose_page_edit", "propose_github_draft", "propose_task", "post_draft_comments"]
-    full = ["propose_resolve", "propose_page_edit", "propose_github_draft", "post_draft_comments",
+    review = ["propose_resolve", "propose_page_edit", "define_terms", "propose_github_draft", "propose_task",
+              "post_draft_comments"]
+    full = ["propose_resolve", "propose_page_edit", "define_terms", "propose_github_draft", "post_draft_comments",
             "set_context", "reload_walkthrough"]
     assert [t["name"] for t in cw_mcp.outcome_tools()] == review
     assert [t["name"] for t in cw_mcp.outcome_tools("full")] == full
@@ -733,6 +735,32 @@ def test_set_context_outcome_cleans_and_needs_no_reference():
     assert cw_mcp._context_payload({"context": good})["ticket"]["key"] == "AO-82"
     assert "object" in cw_mcp.check_outcome(anchor, "set_context", {"context": "AO-82"})
     assert "16384" in cw_mcp.check_outcome(anchor, "set_context", {"context": {"purpose": "y" * 17000}})
+
+
+def test_define_terms_validates_dedupes_caps_and_needs_no_reference():
+    anchor = {"anchors": [{"kind": "free", "quote": ""}]}
+    pair = lambda t, d="A thing.": {"term": t, "def": d}
+    assert cw_mcp.check_outcome(anchor, "define_terms", {"terms": [pair("Order Book")]}) is None
+    for bad in (None, "x", [], [1], [{"term": "x"}], [pair("a")], [pair("ok", "  ")], [pair("n" * 41)], [{"term": 3, "def": "d"}]):
+        assert "terms must be" in cw_mcp.check_outcome(anchor, "define_terms", {"terms": bad})
+    assert "already" in cw_mcp.check_outcome(anchor, "define_terms", {"terms": [pair("Order Book")]}, {"terms"})
+    many = [pair(f"term{i}") for i in range(8)] + [pair("TERM0", "dup")]
+    cleaned = cw_mcp.clean_terms(many + [pair("  spaced   out ", "d" * 300)])
+    assert [t["term"] for t in cleaned] == [f"term{i}" for i in range(5)]
+    assert cw_mcp.clean_terms([pair("  spaced   out ", "d" * 300)]) == [{"term": "spaced out", "def": "d" * 240}]
+    assert cw_mcp.OUTCOME_KINDS["define_terms"]["payload"]({"terms": many}, None) == {"terms": cleaned}
+
+
+def test_clean_terms_keeps_only_whole_words_present_in_the_text():
+    text = "The Order Book feeds the matcher; ordering is unrelated. Uses C++ (x) too."
+    pairs = [{"term": t, "def": "d"} for t in ("order book", "order", "match", "absent", "C++ (x)")]
+    assert [t["term"] for t in cw_mcp.clean_terms(pairs, text)] == ["order book", "order", "C++ (x)"]
+
+
+def test_clean_terms_ignores_code_spans_and_matches_across_whitespace():
+    pairs = [{"term": t, "def": "d"} for t in ("matcher", "order book", "fenced", "Élan")]
+    text = "Use `matcher` here.\n\n```\nfenced()\n```\nThe order\n  book and élan; xÉlan no."
+    assert [t["term"] for t in cw_mcp.clean_terms(pairs, text)] == ["order book", "Élan"]
 
 
 def test_mcp_switches_to_a_newer_plugin_install_and_replays_the_request():

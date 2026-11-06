@@ -899,7 +899,12 @@ def _visuals_submit_tool(need_calls=False):
             "text": {"type": "string", "maxLength": 48}, "group": group, "refs": refs},
             "required": ["kind", "text"]}}},
         "required": ["title", "nodes", "edges"]}
+    text = {"type": "string", "maxLength": visuals.CONCEPT_TEXT_MAX}
     props = {"overview": overview,
+             "concepts": {"type": "array", "maxItems": visuals.MAX_CONCEPTS, "items": {
+                 "type": "object", "properties": {
+                     "index": {"type": "integer"}, "title": {"type": "string", "maxLength": visuals.TITLE_MAX},
+                     "before": text, "after": text, "why": text, "html": {"type": "string"}}}},
              "groups": {"type": "array", "items": {"type": "object", "properties": {
                  "index": {"type": "integer"}, "html": {"type": "string"}}}}}
     if need_calls:
@@ -910,7 +915,7 @@ def _visuals_submit_tool(need_calls=False):
             "required": ["from", "to", "state"]}}
     return {"type": "function", "function": {
         "name": "submit_visuals",
-        "description": "Submit the overview graph and one picture per group (HTML/SVG fragments).",
+        "description": "Submit the concepts, the overview graph and one picture per group (HTML/SVG fragments).",
         "parameters": {"type": "object", "properties": props}}}
 
 
@@ -927,6 +932,10 @@ def _write_model_symdelta(d, meta, symdelta, calls):
         "target": meta["target"], "language": "model", "resolver": "model",
         "reason": symdelta.get("reason"), "nodes": nodes, "edges": edges, "moved": [],
         "presets": presets, "counts": counts})
+
+
+def _empty_visuals():
+    return {"pr": None, "overview": None, "groups": {}, "concepts": []}
 
 
 def _visuals_user_text(d, meta, analysis, symdelta, need_calls=False):
@@ -958,7 +967,8 @@ def _visuals_user_text(d, meta, analysis, symdelta, need_calls=False):
 
 
 def _run_visuals(d, meta, config, on_event, force=False):
-    """Authors the overview graph and one picture per group into visuals.json. Never raises and never
+    """Authors the concepts (text first, then a before/after picture each), the overview graph and one
+    picture per group into visuals.json. Never raises and never
     fails the run: a failure only marks the `visuals` step failed and the page has no pictures."""
     out = d / "visuals.json"
     if out.exists() and not force:
@@ -989,20 +999,30 @@ def _run_visuals(d, meta, config, on_event, force=False):
             try:
                 return _author(*job)
             except Exception as e:
-                return {"pr": None, "overview": None, "groups": {}}, [f"{job[0]}: {e}"], []
+                return _empty_visuals(), [f"{job[0]}: {e}"], []
 
-        def _author(name, scope, group=None):
+        def _author(name, scope, group=None, concept=None):
             """One scoped submit_visuals conversation -> (clean, problems, calls)."""
             messages = [{"role": "system", "content": system_prompt},
                         {"role": "user", "content": _visuals_user_text(
-                            d, meta, analysis, symdelta, need_calls and group is None) + "\n\n" + scope}]
+                            d, meta, analysis, symdelta, need_calls and name == "overview")
+                            + "\n\n" + scope}]
             state: dict = {"attempt": 0}
 
             def handler(args):
                 state["attempt"] += 1
                 args = args if isinstance(args, dict) else {}
-                if group is None:
-                    scoped = {**args, "groups": []}
+                if name == "concepts":
+                    cs = args.get("concepts")
+                    scoped = {"concepts": [{k: v for k, v in c.items() if k != "html"} for c in cs
+                                           if isinstance(c, dict)] if isinstance(cs, list) else []}
+                elif concept is not None:
+                    cs = args.get("concepts")
+                    pic = next((c.get("html") for c in cs if isinstance(c, dict)
+                                and c.get("index") in (concept[0], None)), None) if isinstance(cs, list) else None
+                    scoped = {"concepts": [{**concept[1], "index": concept[0], "html": pic}]}
+                elif group is None:
+                    scoped = {**args, "groups": [], "concepts": []}
                 else:
                     gs = args.get("groups")
                     scoped = {"groups": [g for g in gs if isinstance(g, dict) and g.get("index") == group]
@@ -1010,8 +1030,11 @@ def _run_visuals(d, meta, config, on_event, force=False):
                 clean, problems = visuals.check_visuals(scoped, n_groups, ctx)
                 if group is not None and group not in clean["groups"] and not problems:
                     problems = [f"visuals.groups: no picture for group {group}"]
+                if concept is not None and not (clean.get("concepts") and clean["concepts"][0].get("html")) \
+                        and not problems:
+                    problems = [f"visuals.concepts: no picture for concept {concept[0]}"]
                 calls = []
-                if group is None and need_calls:
+                if name == "overview" and need_calls:
                     calls, call_problems = visuals.check_calls(args.get("calls"), ctx)
                     problems = problems + call_problems
                 if problems and state["attempt"] < 3:
@@ -1024,7 +1047,7 @@ def _run_visuals(d, meta, config, on_event, force=False):
             error = None
             try:
                 cw_llm.run_tools(
-                    profile, messages, tools + [_visuals_submit_tool(need_calls and group is None)],
+                    profile, messages, tools + [_visuals_submit_tool(need_calls and name == "overview")],
                     local_handlers, max_rounds=8, max_tokens=config["max_conversation_tokens"],
                     timeout=config["timeout_s"], on_usage=on_usage, cwd=d / "head")
             except Exception as e:
@@ -1032,7 +1055,7 @@ def _run_visuals(d, meta, config, on_event, force=False):
             finally:
                 _write_transcript(d, f"visuals-{name}", profile, messages, result="clean" in state, error=error)
             if "clean" not in state:
-                return {"pr": None, "overview": None, "groups": {}}, [error or f"{name}: nothing submitted"], []
+                return _empty_visuals(), [error or f"{name}: nothing submitted"], []
             return state["clean"], state["problems"] + ([error] if error else []), state["calls"]
 
         jobs = []
@@ -1040,33 +1063,57 @@ def _run_visuals(d, meta, config, on_event, force=False):
             jobs.append(("overview", "Author only the overview" + (" (and `calls`)." if need_calls else "."), None))
         jobs += [(f"group-{i}", f"Author only group {i}: submit one entry in `groups` with index {i}, "
                                 "and no overview.", i) for i in range(min(n_groups, visuals.MAX_GROUPS))]
-        with ThreadPoolExecutor(max_workers=4) as pool:
-            results = list(pool.map(lambda j: author(*j), jobs))
-        clean = {"pr": None, "overview": None, "groups": {}}
+        clean = _empty_visuals()
         problems, calls = [], []
         if n_groups > visuals.MAX_GROUPS:
             problems.append(f"visuals.groups: at most {visuals.MAX_GROUPS} pictures, "
                             f"{n_groups - visuals.MAX_GROUPS} dropped")
+        with ThreadPoolExecutor(max_workers=4) as pool, \
+                ThreadPoolExecutor(max_workers=visuals.MAX_CONCEPTS) as pic_pool:
+            concepts_job = pool.submit(author, "concepts", "Author only `concepts`, text only: no `html`, "
+                                       "no overview, no groups.")
+            futures = [pool.submit(author, *j) for j in jobs]
+            texts, probs, _ = concepts_job.result()
+            problems += probs
+            concepts = texts.get("concepts", [])
+            pic_futures = [pic_pool.submit(
+                author, f"concept-{i}", f"Author only the picture for concept {i} ({c['title']}): submit one "
+                "entry in `concepts` with only its `html`, a before -> after diagram. No overview, no groups.",
+                None, (i, c)) for i, c in enumerate(concepts)]
+            results = [f.result() for f in futures]
+            pic_results = [f.result() for f in pic_futures]
         for c, probs, cs in results:
             clean["pr"] = clean["pr"] or c["pr"]
             clean["overview"] = clean["overview"] or c["overview"]
             clean["groups"].update(c["groups"])
             problems += probs
             calls += cs
-        size = {i: len(h.encode("utf-8", "replace")) for i, h in clean["groups"].items()}
+        for text, (c, probs, _) in zip(concepts, pic_results):
+            pic = c["concepts"][0].get("html") if c.get("concepts") else None
+            clean["concepts"].append({**text, "html": pic} if pic else text)
+            problems += probs
+        size = {("g", i): len(h.encode("utf-8", "replace")) for i, h in clean["groups"].items()}
+        size.update({("c", i): len(c["html"].encode("utf-8", "replace"))
+                     for i, c in enumerate(clean["concepts"]) if c.get("html")})
         while sum(size.values()) > visuals.TOTAL_MAX:
-            big = max(size, key=size.get)
-            del size[big], clean["groups"][big]
-            problems.append(f"visuals.groups: picture {big} dropped, over the {visuals.TOTAL_MAX // 1024} KB total")
+            kind, i = big = max(size, key=size.get)
+            del size[big]
+            if kind == "g":
+                del clean["groups"][i]
+            else:
+                del clean["concepts"][i]["html"]
+            problems.append(f"visuals.{'groups' if kind == 'g' else 'concepts'}: picture {i} dropped, "
+                            f"over the {visuals.TOTAL_MAX // 1024} KB total")
         if calls:
             _write_model_symdelta(d, meta, symdelta, calls)
         else:
             (d / "symdelta.model.json").unlink(missing_ok=True)
-        if not clean["overview"] and not clean["pr"] and not clean["groups"]:
+        if not (clean["overview"] or clean["pr"] or clean["groups"] or clean["concepts"]):
             raise RuntimeError("no usable pictures; dropped: " + "; ".join(problems)[:500])
         cw_store.write_json(out, {
             "overview": clean["overview"],
             "pr": clean["pr"],
+            **({"concepts": clean["concepts"]} if clean["concepts"] else {}),
             "groups": [{"index": i, "html": h} for i, h in sorted(clean["groups"].items())]})
         _emit_step(d, on_event, "visuals", "ok", **({"lines": problems} if problems else {}))
         return True

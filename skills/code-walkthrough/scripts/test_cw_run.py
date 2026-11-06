@@ -308,12 +308,17 @@ def _submit(args):
 
 def _scope_of(body):
     text = cw_testlib.last_user_text(body)
+    if "Author only `concepts`" in text:
+        return "concepts"
+    if "Author only the picture for concept " in text:
+        return "concept-" + text.rsplit("Author only the picture for concept ", 1)[1].split(" ")[0]
     return "overview" if "Author only the overview" in text else "group-" + text.rsplit("Author only group ", 1)[1].split(":")[0]
 
 
 def _scoped(**replies):
     """Scripted replies per visuals call (overview=[...], group_0=[...]); each call walks its own list."""
     seen, lock = {}, threading.Lock()
+    replies.setdefault("concepts", [_submit({"concepts": []})])
 
     def script(body, _n):
         scope = _scope_of(body)
@@ -361,7 +366,7 @@ def _overview(ref="foo.py:X"):
 
 def test_visuals_submit_tool_schema_has_overview_and_no_pr():
     props = cw_run._visuals_submit_tool()["function"]["parameters"]["properties"]
-    assert "pr" not in props and set(props) == {"overview", "groups"}
+    assert "pr" not in props and set(props) == {"overview", "concepts", "groups"}
     node = props["overview"]["properties"]["nodes"]["items"]["properties"]
     assert node["kind"]["enum"] == ["same", "new", "changed", "guard", "removed"]
     assert node["label"]["maxLength"] == 22 and props["overview"]["properties"]["nodes"]["maxItems"] == 12
@@ -390,7 +395,7 @@ def test_visuals_pass_prefers_the_visuals_role_over_prose():
                                     {"analysis": "p", "prose": "p", "visuals": "v"})
             stub.script = {"vis-m": [_submit({"pr": None, "groups": [{"index": 0, "html": "<p>n</p>"}]})]}
             assert cw_run._run_visuals(d, meta, cw_store.load_config(), None)
-            assert stub.count("vis-m") == 2 and stub.count("prose-m") == 0
+            assert stub.count("vis-m") == 3 and stub.count("prose-m") == 0
 
 
 def test_visuals_pass_keeps_the_clean_part_on_the_final_attempt():
@@ -403,7 +408,7 @@ def test_visuals_pass_keeps_the_clean_part_on_the_final_attempt():
             assert cw_run._run_visuals(d, meta, cw_store.load_config(), None)
             saved = json.loads((d / "visuals.json").read_text())
             assert saved["pr"] is None and saved["groups"][0]["index"] == 0
-            assert stub.count("prose-m") == 4
+            assert stub.count("prose-m") == 5
 
 
 def test_visuals_pass_fails_when_nothing_clean_survives_the_final_attempt():
@@ -416,6 +421,86 @@ def test_visuals_pass_fails_when_nothing_clean_survives_the_final_attempt():
             assert not (d / "visuals.json").exists()
             step = cw_store.read_meta(d)["steps"]["visuals"]
             assert step["status"] == "failed" and "<img> is not allowed" in step["error"]
+
+
+CONCEPT = {"title": "Live config", "before": "Constants, redeploy to change",
+           "after": "Config is read live", "why": "No deploy to tune a limit"}
+
+
+def _concept_dir(home, tmp, stub, texts=(CONCEPT,), pics=("<p>pic</p>",)):
+    d, meta = _visuals_dir(home, tmp, stub)
+    stub.script = _scoped(
+        concepts=[_submit({"concepts": [{**t, "html": "<p>ignored</p>"} for t in texts]})],
+        group_0=[G0],
+        concept_0=[_submit({"concepts": [{"index": 0, "html": pics[0]}]})] if pics else [_submit({})],
+        concept_1=[_submit({"concepts": [{"index": 1, "html": pics[-1]}]})] if pics else [_submit({})])
+    return d, meta
+
+
+def test_concepts_are_drawn_after_their_text_and_stored_with_the_picture():
+    with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
+        with cw_testlib.StubLLM({}) as stub:
+            d, meta = _concept_dir(home, tmp, stub, texts=(CONCEPT, {**CONCEPT, "title": "Two"}),
+                                        pics=("<p>pic0</p>", "<p>pic1</p>"))
+            assert cw_run._run_visuals(d, meta, cw_store.load_config(), None)
+            saved = json.loads((d / "visuals.json").read_text())
+            assert saved["concepts"] == [{**CONCEPT, "html": "<p>pic0</p>"},
+                                         {**CONCEPT, "title": "Two", "html": "<p>pic1</p>"}]
+            assert "Live config" in cw_testlib.last_user_text(_requests_for(stub, "concept-0")[0])
+            assert {p.name for p in (d / "runs").glob("visuals-concept-*")} == {
+                "visuals-concept-0-1.json", "visuals-concept-1-1.json"}
+
+
+def test_a_failed_concept_picture_keeps_the_text_as_fallback():
+    with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
+        with cw_testlib.StubLLM({}) as stub:
+            d, meta = _concept_dir(home, tmp, stub, pics=("<img src='x'>",))
+            assert cw_run._run_visuals(d, meta, cw_store.load_config(), None)
+            saved = json.loads((d / "visuals.json").read_text())
+            assert saved["concepts"] == [CONCEPT]
+            assert len(_requests_for(stub, "concept-0")) == 3
+
+
+def test_bad_concept_text_leaves_the_groups_intact():
+    with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
+        with cw_testlib.StubLLM({}) as stub:
+            d, meta = _visuals_dir(home, tmp, stub)
+            bad = _submit({"concepts": [{**CONCEPT, "why": ""}]})
+            stub.script = _scoped(concepts=[bad], group_0=[G0])
+            assert cw_run._run_visuals(d, meta, cw_store.load_config(), None)
+            saved = json.loads((d / "visuals.json").read_text())
+            assert "concepts" not in saved and saved["groups"] == [{"index": 0, "html": "<p>g</p>"}]
+            assert not _requests_for(stub, "concept-0")
+
+
+def test_a_concept_picture_is_taken_from_the_entry_with_its_own_index():
+    with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
+        with cw_testlib.StubLLM({}) as stub:
+            d, meta = _concept_dir(home, tmp, stub)
+            stub.script = _scoped(
+                concepts=[_submit({"concepts": [CONCEPT]})], group_0=[G0],
+                concept_0=[_submit({"concepts": [{"index": 1, "html": "<p>wrong</p>"},
+                                                 {"index": 0, "html": "<p>right</p>"}]})])
+            assert cw_run._run_visuals(d, meta, cw_store.load_config(), None)
+            assert json.loads((d / "visuals.json").read_text())["concepts"][0]["html"] == "<p>right</p>"
+
+
+def test_total_cap_evicts_the_biggest_picture_and_the_saved_file_reloads_clean(monkeypatch):
+    import render
+    monkeypatch.setattr(cw_run.visuals, "TOTAL_MAX", 15 * 1024)
+    with cw_testlib.temp_home() as home, tempfile.TemporaryDirectory() as tmp:
+        with cw_testlib.StubLLM({}) as stub:
+            d, meta = _visuals_dir(home, tmp, stub)
+            big, small = "<p>" + "x" * 9000 + "</p>", "<p>" + "y" * 7000 + "</p>"
+            stub.script = _scoped(
+                concepts=[_submit({"concepts": [CONCEPT]})],
+                concept_0=[_submit({"concepts": [{"index": 0, "html": big}]})],
+                group_0=[_submit({"groups": [{"index": 0, "html": small}]})])
+            assert cw_run._run_visuals(d, meta, cw_store.load_config(), None)
+            saved = json.loads((d / "visuals.json").read_text())
+            assert saved["concepts"] == [CONCEPT] and saved["groups"][0]["html"] == small
+            clean, lines = render.load_visuals(d / "visuals.json", 1)
+            assert clean["concepts"] == [CONCEPT] and lines == ["visuals: 2 kept, 0 dropped"]
 
 
 def test_visuals_pass_skips_when_visuals_json_exists_unless_forced():
@@ -460,13 +545,14 @@ def test_visuals_groups_are_authored_in_parallel_calls_and_merged():
             stub.script = _scoped(overview=[_submit({"overview": _overview()})],
                                   group_0=[_group(0)], group_1=[_group(1)])
             assert cw_run._run_visuals(d, meta, cw_store.load_config(), None)
-            assert stub.peak_in_flight == 3
+            assert stub.peak_in_flight == 4
             saved = json.loads((d / "visuals.json").read_text())
             assert set(saved) == {"overview", "pr", "groups"} and saved["overview"]["title"] == "Foo changes"
             assert saved["groups"] == [{"index": 0, "html": "<p>g0</p>"}, {"index": 1, "html": "<p>g1</p>"}]
             assert {p.name for p in (d / "runs").glob("visuals-*")} == {
-                "visuals-overview-1.json", "visuals-group-0-1.json", "visuals-group-1-1.json"}
-            assert cw_store.read_meta(d)["usage"]["prose"]["calls"] == 3
+                "visuals-concepts-1.json", "visuals-overview-1.json", "visuals-group-0-1.json",
+                "visuals-group-1-1.json"}
+            assert cw_store.read_meta(d)["usage"]["prose"]["calls"] == 4
 
 
 def test_a_failing_group_is_dropped_and_the_rest_still_written():

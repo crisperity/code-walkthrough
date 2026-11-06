@@ -52,6 +52,12 @@ Call `post_draft_comments` when the reviewer asks you to review the change and l
 items of `{path, line, side, end_line?, body, suggestion?}`, each on a line inside the diff. They become
 local drafts the user edits and submits later; nothing reaches GitHub until they press Submit review.
 
+When your reply uses words that are specific to this project or its domain (an internal concept, a
+product or ticket term, a house abbreviation) and a newcomer to the codebase would not know them, call
+`define_terms` once with up to 5 `{term, def}` pairs, each term spelled as it appears in your reply and
+each `def` one or two short sentences. Skip common programming vocabulary (function, API, cache, async)
+and anything the reply already explains. Most replies need no glossary.
+
 A comment that begins "Triage this review thread" is the app's fixed triage request, not a request
 to reword or rewrite. Judge the thread against the head code and use the matching tool or reply.
 

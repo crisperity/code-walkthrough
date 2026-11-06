@@ -252,6 +252,59 @@ OUTCOME_TOOLS.append({
 })
 
 
+TERMS_MAX, TERM_MAX, TERM_DEF_MAX = 5, 40, 240
+
+OUTCOME_TOOLS.append({
+    "name": "define_terms",
+    "description": ("Attach a glossary to your reply: up to 5 domain-specific words or phrases from your reply "
+                    "text, each with a 1-2 sentence definition. The page underlines them and shows the "
+                    "definition on hover. Only terms specific to this project or its domain; never common "
+                    "programming vocabulary (function, API, cache). A term must appear verbatim in your reply. "
+                    "Call it once per turn, and not at all when your reply has no such term."),
+    "inputSchema": {
+        "type": "object", "required": ["terms"],
+        "properties": {"terms": {"type": "array", "maxItems": TERMS_MAX, "items": {
+            "type": "object", "required": ["term", "def"],
+            "properties": {"term": {"type": "string", "maxLength": TERM_MAX},
+                           "def": {"type": "string", "maxLength": TERM_DEF_MAX}}}}},
+    },
+})
+
+
+def _term_re(term):
+    return re.compile(r"(?<![\w])" + r"\s+".join(map(re.escape, term.split())) + r"(?!\w)", re.IGNORECASE)
+
+
+def clean_terms(raw, text=None):
+    """Valid {term, def} pairs, deduplicated case-insensitively, at most TERMS_MAX. With `text`, drops
+    terms that do not occur in it as whole words outside code spans and fences (the page does not
+    mark those)."""
+    if text is not None:
+        text = re.sub(r"```.*?```|`[^`\n]*`", " ", text, flags=re.DOTALL)
+    out, seen = [], set()
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict) or not isinstance(item.get("term"), str) or not isinstance(item.get("def"), str):
+            continue
+        term, definition = " ".join(item["term"].split()), " ".join(item["def"].split())
+        if not 2 <= len(term) <= TERM_MAX or not definition or term.lower() in seen:
+            continue
+        if text is not None and not _term_re(term).search(text):
+            continue
+        seen.add(term.lower())
+        out.append({"term": term, "def": definition[:TERM_DEF_MAX]})
+        if len(out) == TERMS_MAX:
+            break
+    return out
+
+
+def _check_terms(anchor_doc, args, already):
+    if not clean_terms(args.get("terms")):
+        return "terms must be a list of {term, def} strings (term 2-%d characters, def non-empty)" % TERM_MAX
+    if "terms" in already:
+        return "already defined terms in this turn"
+    return None
+
+
 GITHUB_DRAFT_CAP = 4000
 
 OUTCOME_TOOLS.append({
@@ -656,6 +709,11 @@ OUTCOME_KINDS = {
         "payload": _draft_comments_payload, "key": lambda payload: "draft_comments",
         "accepted": "added to the page as local drafts; the user can edit or remove them and nothing was posted to GitHub",
     },
+    "define_terms": {
+        "outcome": "terms", "state": "applied", "check": _check_terms,
+        "payload": lambda args, anchor_doc=None: {"terms": clean_terms(args["terms"])},
+        "key": lambda payload: "terms", "accepted": "shown as a glossary on your reply",
+    },
     "set_context": {
         "outcome": "context", "state": "applied", "check": _check_context, "payload": _context_payload,
         "key": lambda payload: "context", "accepted": "shown in the Context section",
@@ -672,7 +730,7 @@ def check_outcome(anchor_doc, name, args, already=()):
     kind = OUTCOME_KINDS.get(name)
     if kind is None:
         return f"unknown tool {name}"
-    if name not in ("post_draft_comments", "reload_walkthrough", "set_context") and all(r.get("kind") == "free" for r in _refs(anchor_doc)):
+    if name not in ("post_draft_comments", "reload_walkthrough", "set_context", "define_terms") and all(r.get("kind") == "free" for r in _refs(anchor_doc)):
         return "this comment has no reference (no diff line, prose block or review thread), so this tool cannot be used; reply instead"
     return kind["check"](anchor_doc, args if isinstance(args, dict) else {}, already)
 
@@ -707,6 +765,9 @@ def accept_outcome(d, qid, name, args):
     text = kind["accepted"]
     if name == "propose_page_edit":
         text += f" (oid {record['oid']})"
+    elif name == "define_terms" and len(record["arguments"]["terms"]) < len(args["terms"]):
+        text += (f"; kept {len(record['arguments']['terms'])} of {len(args['terms'])} terms, the rest were "
+                 f"duplicates, malformed or over the limit of {TERMS_MAX}")
     return True, text
 
 

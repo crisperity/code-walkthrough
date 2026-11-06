@@ -18,6 +18,9 @@ TOTAL_MAX = 120 * 1024
 MAX_ELEMENTS = 400
 MAX_DEPTH = 12
 MAX_GROUPS = 12
+MAX_CONCEPTS = 2
+CONCEPT_MAX = 12 * 1024
+CONCEPT_TEXT_MAX = 200
 MAX_PROBLEMS = 8
 TITLE_MAX = 80
 
@@ -714,8 +717,52 @@ def check_overview(raw, n_groups, files=None, symdelta=None, added_removed_text=
     return {"title": title, "nodes": nodes, "edges": edges, "notes": notes}, _cap(problems)
 
 
+def _clip_words(text, cap):
+    if len(text) <= cap:
+        return text
+    return (text[:cap - 1].rsplit(" ", 1)[0] or text[:cap - 1]).rstrip(" ,;:.") + "\u2026"
+
+
+def check_concepts(raw):
+    """raw = [{"title","before","after","why","html"?,"index"?}] -> (clean list, problems). The text
+    is the fallback, so a bad `html` drops only the picture; over-long text is clipped and empty
+    text drops the concept."""
+    if raw is None:
+        return [], []
+    if not isinstance(raw, list):
+        return [], ["visuals.concepts: expected a list"]
+    problems, out = [], []
+    if len(raw) > MAX_CONCEPTS:
+        problems.append(f"visuals.concepts: at most {MAX_CONCEPTS}, {len(raw) - MAX_CONCEPTS} dropped")
+        raw = raw[:MAX_CONCEPTS]
+    for k, c in enumerate(raw):
+        label = f"visuals.concepts[{k}]"
+        if not isinstance(c, dict):
+            problems.append(f"{label}: expected an object with title, before, after, why")
+            continue
+        item = {}
+        for key, cap in (("title", TITLE_MAX), ("before", CONCEPT_TEXT_MAX), ("after", CONCEPT_TEXT_MAX),
+                         ("why", CONCEPT_TEXT_MAX)):
+            v = c.get(key)
+            v = " ".join(v.split()) if isinstance(v, str) else ""
+            if not v:
+                problems.append(f"{label}: {key} must be non-empty plain text")
+                break
+            item[key] = _clip_words(v, cap)
+        else:
+            idx = c.get("index") if _is_int(c.get("index")) and c["index"] >= 0 else k
+            if c.get("html") is not None:
+                pic, probs = sanitize_fragment(c["html"], f"cwc{idx}-", CONCEPT_MAX)
+                problems.extend(f"{label}.html: {p}" for p in probs)
+                if pic:
+                    item["html"] = pic
+            out.append(item)
+    return out, problems
+
+
 def check_visuals(raw, n_groups, ctx=None):
-    """raw = {"overview": {...}|None, "groups": [{"index","html"}], "pr": legacy {"title","html"}|None}
+    """raw = {"overview": {...}|None, "groups": [{"index","html"}], "pr": legacy {"title","html"}|None,
+    "concepts": [{"title","before","after","why","html"?}]}
     -> (clean, problems). ctx = diff_ctx(...) lets overview refs be checked against the diff."""
     clean = {"pr": None, "overview": None, "groups": {}}
     if not isinstance(raw, dict):
@@ -738,7 +785,9 @@ def check_visuals(raw, n_groups, ctx=None):
     if len(groups) > MAX_GROUPS:
         problems.append(f"visuals.groups: at most {MAX_GROUPS} pictures, {len(groups) - MAX_GROUPS} dropped")
         groups = groups[:MAX_GROUPS]
-    items = [("pr", pr)] + [(f"groups[{k}]", g) for k, g in enumerate(groups)]
+    concepts = raw.get("concepts")
+    items = [("pr", pr)] + [(f"groups[{k}]", g) for k, g in enumerate(groups)] + [
+        (f"concepts[{k}]", c) for k, c in enumerate(concepts if isinstance(concepts, list) else [])]
     for _, it in items:
         h = it.get("html") if isinstance(it, dict) else None
         total += len(h.encode("utf-8", "replace")) if isinstance(h, str) else 0
@@ -757,6 +806,10 @@ def check_visuals(raw, n_groups, ctx=None):
                 out = frag("visuals.pr", pr.get("html"), "cwv0-", PR_MAX)
                 if out:
                     clean["pr"] = {"title": title, "html": out}
+    cs, probs = check_concepts(concepts)
+    if cs:
+        clean["concepts"] = cs
+    problems.extend(probs)
     if raw.get("overview") is not None:
         ctx = ctx or {}
         clean["overview"], probs = check_overview(
