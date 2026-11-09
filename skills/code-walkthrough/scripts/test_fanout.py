@@ -10,7 +10,7 @@ import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from fanout import batch, do_split, merge, split_chunks  # noqa: E402
+from fanout import batch, do_split, merge, split_chunks, stub_diff  # noqa: E402
 
 
 def _file_diff(path, hunks):
@@ -20,9 +20,10 @@ def _file_diff(path, hunks):
     return body
 
 
-def _args(diff, out, max_lines=400, max_batches=8):
+def _args(diff, out, max_lines=400, max_batches=8, max_chars=10**9):
     """Stand-in for the argparse.Namespace do_split reads its options from."""
-    return types.SimpleNamespace(diff=diff, out=out, max_lines=max_lines, max_batches=max_batches)
+    return types.SimpleNamespace(diff=diff, out=out, max_lines=max_lines, max_batches=max_batches,
+                                 max_chars=max_chars)
 
 
 DIFF = _file_diff("a.py", 1) + _file_diff("big.py", 30) + _file_diff("c.py", 1)
@@ -253,3 +254,42 @@ def test_split_seed_marks_a_binary_file_with_no_hunks():
 
         seed = json.loads((out_dir / "fragment-1.seed.json").read_text())
         assert seed["files"] == [{"path": "logo.png", "role": "", "hunks": []}]
+
+
+def test_batch_budgets_by_characters_and_gives_an_oversized_file_its_own_batch():
+    chunks = [("a", "x" * 50), ("big", "y" * 500), ("b", "x" * 50), ("c", "x" * 50)]
+    got = batch(chunks, max_lines=1000, max_batches=1, max_chars=120)
+    assert [[p for p, _ in g] for g in got] == [["a"], ["big"], ["b", "c"]]
+
+
+def _plain(path, body="+x\n"):
+    return f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n@@ -1,1 +1,2 @@\n ctx\n{body}"
+
+
+def test_stub_diff_keeps_headers_and_withholds_golden_binary_long_line_and_big_files():
+    big_body = "".join(f"+line {i} {'z' * 40}\n" for i in range(1500))
+    diff = (
+        _plain("ok.py")
+        + _plain("t/out.golden.xml", "+<a/>\n")
+        + "diff --git a/img.png b/img.png\nindex 1..2 100644\nGIT binary patch\nliteral 3\nabc\n\n"
+        + _plain("long.py", "+" + "q" * 2500 + "\n")
+        + _plain("huge.py", big_body)
+    )
+    shown, withheld = stub_diff(diff)
+    assert withheld == {"t/out.golden.xml", "img.png", "long.py", "huge.py"}
+    assert "+x\n" in shown.split("diff --git a/t/out")[0]
+    for path in ("t/out.golden.xml", "long.py", "huge.py"):
+        assert f"+++ b/{path}\n@@ -1,1 +1,2 @@\n<" in shown
+    assert "q" * 2500 not in shown and "literal 3" not in shown and "KB omitted" in shown
+    assert split_chunks(shown)[0][0] == "ok.py" and len(split_chunks(shown)) == 5
+
+
+def test_stub_diff_extra_paths_are_withheld_too():
+    shown, withheld = stub_diff(_plain("a.py") + _plain("b.py"), extra={"b.py"})
+    assert withheld == {"b.py"} and "+x" in shown.split("diff --git a/b.py")[0]
+
+
+def test_batch_counts_a_withheld_file_at_its_stubbed_size():
+    golden = "diff --git a/x.golden.xml b/x.golden.xml\n--- a/x.golden.xml\n+++ b/x.golden.xml\n@@ -1,1 +1,1 @@\n+" + "g" * 5000 + "\n"
+    chunks = [("x.golden.xml", golden), ("a.py", _plain("a.py"))]
+    assert len(batch(chunks, max_lines=1000, max_batches=1, max_chars=1000)) == 1

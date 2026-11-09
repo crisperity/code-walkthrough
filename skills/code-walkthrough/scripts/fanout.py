@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Split raw.diff into per-file batches for parallel analysis, then merge the results.
 
-  python3 fanout.py split --diff raw.diff --out <dir> [--max-lines 400] [--max-batches 8]
+  python3 fanout.py split --diff raw.diff --out <dir> [--max-lines 400] [--max-chars 120000] [--max-batches 8]
   python3 fanout.py merge --diff raw.diff --prose prose.json \
       --fragments <dir>/fragment-1.json ... --out analysis.json
 
@@ -66,19 +66,71 @@ def split_chunks(text):
     return [(order[i], text[bounds[i] : bounds[i + 1]]) for i in range(len(order))]
 
 
-def batch(chunks, max_lines, max_batches):
+STUB_NAME = re.compile(r"\.golden\.|\.snap$|\.lock$|(^|/)(package-lock\.json|pnpm-lock\.yaml)$")
+STUB_LINE_CHARS = 2000
+STUB_FILE_CHARS = 60000
+
+
+def should_stub(path, chunk):
+    return (
+        bool(STUB_NAME.search(path))
+        or "GIT binary patch" in chunk
+        or re.search(r"^Binary files .* differ$", chunk, re.M) is not None
+        or len(chunk) > STUB_FILE_CHARS
+        or any(len(line) > STUB_LINE_CHARS for line in chunk.split("\n"))
+    )
+
+
+def stub_chunk(chunk):
+    """Keep the file header and every `@@` line, drop the hunk bodies: seed entries and
+    validation key on the headers."""
+    out, body, in_body = [], 0, False
+
+    def flush():
+        if body:
+            out.append(f"<{-(-body // 1000)} KB omitted: golden/generated/binary>\n")
+
+    for line in chunk.splitlines(keepends=True):
+        if line.startswith("@@"):
+            flush()
+            out.append(line)
+            body, in_body = 0, True
+        elif in_body or line.startswith("GIT binary patch"):
+            body, in_body = body + len(line), True
+        else:
+            out.append(line)
+    flush()
+    return "".join(out)
+
+
+def stub_diff(text, extra=()):
+    """The diff as a model should see it, plus the paths whose bodies were withheld."""
+    parts, withheld = [], set()
+    for path, chunk in split_chunks(text):
+        if path in extra or should_stub(path, chunk):
+            parts.append(stub_chunk(chunk))
+            withheld.add(path)
+        else:
+            parts.append(chunk)
+    return "".join(parts), withheld
+
+
+def batch(chunks, max_lines, max_batches, max_chars=None):
     """Greedy contiguous fill. A file never straddles two batches: its notes read better
     written against the whole file's diff."""
     total = sum(chunk.count("\n") for _, chunk in chunks)
     budget = max(max_lines, -(-total // max_batches)) if max_batches > 0 else max_lines
-    batches, current, current_lines = [], [], 0
+    batches, current, current_lines, current_chars = [], [], 0, 0
     for path, chunk in chunks:
         lines = chunk.count("\n")
-        if current and current_lines + lines > budget:
+        size = len(stub_chunk(chunk) if should_stub(path, chunk) else chunk)
+        if current and (current_lines + lines > budget
+                        or (max_chars and current_chars + size > max_chars)):
             batches.append(current)
-            current, current_lines = [], 0
+            current, current_lines, current_chars = [], 0, 0
         current.append((path, chunk))
         current_lines += lines
+        current_chars += size
     if current:
         batches.append(current)
     return batches
@@ -109,7 +161,7 @@ def do_split(args):
 
     _, diff_files = parse_hunks(text)
     manifest = []
-    for i, group in enumerate(batch(split_chunks(text), args.max_lines, args.max_batches), 1):
+    for i, group in enumerate(batch(split_chunks(text), args.max_lines, args.max_batches, args.max_chars), 1):
         batch_path = out_dir / f"batch-{i}.diff"
         seed_path = out_dir / f"fragment-{i}.seed.json"
         body = "".join(chunk for _, chunk in group)
@@ -195,6 +247,7 @@ def main():
     split_parser.add_argument("--diff", required=True)
     split_parser.add_argument("--out", required=True)
     split_parser.add_argument("--max-lines", type=int, default=400)
+    split_parser.add_argument("--max-chars", type=int, default=120000)
     split_parser.add_argument("--max-batches", type=int, default=8)
     split_parser.set_defaults(func=do_split)
 

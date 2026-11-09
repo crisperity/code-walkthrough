@@ -21,6 +21,7 @@ import cw_run  # noqa: E402
 import cw_store  # noqa: E402
 import cw_testlib  # noqa: E402
 import fanout  # noqa: E402
+from validate_analysis import WITHHELD_NOTE  # noqa: E402
 
 
 def _config(**overrides):
@@ -41,7 +42,8 @@ def _prepare_batches(tmp, repo, base, head, max_lines=1):
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         fanout.do_split(types.SimpleNamespace(
-            diff=str(d / "raw.diff"), out=str(batches_dir), max_lines=max_lines, max_batches=8))
+            diff=str(d / "raw.diff"), out=str(batches_dir), max_lines=max_lines, max_batches=8,
+            max_chars=1000000000))
     manifest = json.loads(buf.getvalue())
     (batches_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
     return d, manifest
@@ -119,6 +121,169 @@ def test_failing_fragment_gate_escalates(kind):
         assert not (d / "batches" / "fragment-1.json").exists()
         if log:
             assert all(Path(e["cwd"]).resolve() == (d / "head").resolve() for e in log())
+
+
+def test_stubbed_long_line_file_reaches_the_model_headers_only_and_passes_with_the_canned_note():
+    big = "x" * 5000
+    with tempfile.TemporaryDirectory() as tmp:
+        repo, base, head = cw_testlib.make_repo(tmp, {"foo.py": "a\nb\nc\n"}, {"foo.py": f"a\n{big}\nc\n"})
+        d, manifest = _prepare_batches(tmp, repo, base, head, max_lines=50)
+        (d / "head").mkdir()
+        entry = manifest[0]
+        seed = json.loads(Path(entry["seed"]).read_text())
+        with cw_testlib.StubLLM({"m": [cw_testlib.tool_call("submit_fragment", _passing_fragment(seed))]}) as stub:
+            config = _config(profiles={"a": stub.profile("m")}, roles={"analysis": "a", "escalate": "a"})
+            assert cw_run._run_batch(d, 1, entry, config, None) is True
+            prompt = json.dumps(stub.requests)
+        assert big not in prompt and "KB omitted" in prompt and seed["files"][0]["hunks"][0]["header"] in prompt
+        frag = json.loads((d / "batches" / "fragment-1.json").read_text())
+        assert {h["note"] for h in frag["files"][0]["hunks"]} == {WITHHELD_NOTE}
+        assert json.loads((d / "meta.json").read_text())["withheld"] == {"1": ["foo.py"]}
+
+
+def test_flagged_error_skips_escalate_and_names_the_batch_files():
+    cw_testlib.require_posix()
+    with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+        repo, base, head = cw_testlib.make_repo(tmp, {"foo.py": "a\nb\nc\n"}, {"foo.py": "a\nX\nc\n"})
+        d, manifest = _prepare_batches(tmp, repo, base, head)
+        (d / "head").mkdir()
+        flagged = cw_testlib.claude_result(is_error=True, result="API Error: safeguards flagged this message")
+        fc = stack.enter_context(cw_testlib.fake_claude(tmp, {"sonnet": [flagged] * 3, "opus": [flagged] * 3}))
+        config = _config(profiles={"a": {"kind": "claude-code", "model": "sonnet"},
+                                    "e": {"kind": "claude-code", "model": "opus"}},
+                          roles={"analysis": "a", "escalate": "e"})
+        assert cw_run._run_batch(d, 1, manifest[0], config, None) is False
+        assert fc.count("opus") == 0
+        step = json.loads((d / "meta.json").read_text())["steps"]["batch-1"]
+        assert step["attempts"] == 1
+        assert "batch 1" in step["remedy"] and "foo.py" in step["remedy"]
+
+
+def test_flagged_batch_retries_with_the_largest_file_stubbed():
+    cw_testlib.require_posix()
+    with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+        repo, base, head = cw_testlib.make_repo(
+            tmp, {"small.py": "a\nb\n", "large.py": "a\nb\n"},
+            {"small.py": "a\nX\n", "large.py": "a\n" + "y = 1\n" * 200})
+        d, manifest = _prepare_batches(tmp, repo, base, head, max_lines=1000)
+        (d / "head").mkdir()
+        entry = manifest[0]
+        assert len(manifest) == 1
+        seed = json.loads(Path(entry["seed"]).read_text())
+        flagged = cw_testlib.claude_result(is_error=True, result="API Error: safeguards flagged this message")
+        good = cw_testlib.claude_result(structured=_passing_fragment(seed))
+        fc = stack.enter_context(cw_testlib.fake_claude(tmp, {"sonnet": [flagged, good], "opus": [good]}))
+        config = _config(profiles={"a": {"kind": "claude-code", "model": "sonnet"},
+                                    "e": {"kind": "claude-code", "model": "opus"}},
+                          roles={"analysis": "a", "escalate": "e"})
+        events = []
+        assert cw_run._run_batch(d, 1, entry, config, lambda k, v: events.append(v)) is True
+        assert fc.count("sonnet") == 2 and fc.count("opus") == 0
+        meta = json.loads((d / "meta.json").read_text())
+        assert meta["withheld"] == {"1": ["large.py"]}
+        assert meta["steps"]["batch-1"]["withheld"] == ["large.py"]
+        frag = json.loads((d / "batches" / "fragment-1.json").read_text())
+        by_path = {f["path"]: f for f in frag["files"]}
+        assert all(h["note"] == WITHHELD_NOTE for h in by_path["large.py"]["hunks"])
+        assert all(h["note"] != WITHHELD_NOTE for h in by_path["small.py"]["hunks"])
+
+
+def test_batch_stays_failed_when_every_file_is_stubbed_and_still_flagged():
+    cw_testlib.require_posix()
+    with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+        repo, base, head = cw_testlib.make_repo(tmp, {"foo.py": "a\nb\n"}, {"foo.py": "a\nX\n"})
+        d, manifest = _prepare_batches(tmp, repo, base, head)
+        (d / "head").mkdir()
+        flagged = cw_testlib.claude_result(is_error=True, result="API Error: safeguards flagged this message")
+        fc = stack.enter_context(cw_testlib.fake_claude(tmp, {"sonnet": [flagged] * 5, "opus": [flagged] * 5}))
+        config = _config(profiles={"a": {"kind": "claude-code", "model": "sonnet"},
+                                    "e": {"kind": "claude-code", "model": "opus"}},
+                          roles={"analysis": "a", "escalate": "e"})
+        assert cw_run._run_batch(d, 1, manifest[0], config, None) is False
+        assert fc.count("sonnet") == 2 and fc.count("opus") == 0
+        assert "foo.py" in json.loads((d / "meta.json").read_text())["steps"]["batch-1"]["remedy"]
+
+
+def test_flagged_recovery_stops_after_five_stubbed_files():
+    cw_testlib.require_posix()
+    names = [f"f{i}.py" for i in range(7)]
+    with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+        repo, base, head = cw_testlib.make_repo(
+            tmp, {n: "a\nb\n" for n in names}, {n: "a\nX\n" for n in names})
+        d, manifest = _prepare_batches(tmp, repo, base, head, max_lines=1000)
+        (d / "head").mkdir()
+        flagged = cw_testlib.claude_result(is_error=True, result="API Error: safeguards flagged this message")
+        fc = stack.enter_context(cw_testlib.fake_claude(tmp, {"sonnet": [flagged] * 20, "opus": [flagged] * 20}))
+        config = _config(profiles={"a": {"kind": "claude-code", "model": "sonnet"},
+                                    "e": {"kind": "claude-code", "model": "opus"}},
+                          roles={"analysis": "a", "escalate": "e"})
+        assert cw_run._run_batch(d, 1, manifest[0], config, None) is False
+        assert fc.count("sonnet") == 6 and fc.count("opus") == 0
+
+
+def test_small_route_stubs_and_retries_on_flagged_without_escalating():
+    cw_testlib.require_posix()
+    with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+        repo, base, head = cw_testlib.make_repo(
+            tmp, {"small.py": "a\nb\n", "large.py": "a\nb\n"},
+            {"small.py": "a\nX\n", "large.py": "a\n" + "y = 1\n" * 200})
+        d, manifest = _prepare_batches(tmp, repo, base, head, max_lines=1000)
+        (d / "head").mkdir()
+        seed = json.loads(Path(manifest[0]["seed"]).read_text())
+        analysis = {**_passing_fragment(seed), "overview": "Overview text", "verdict": "v"}
+        flagged = cw_testlib.claude_result(is_error=True, result="API Error: safeguards flagged this message")
+        good = cw_testlib.claude_result(structured=analysis)
+        fc = stack.enter_context(cw_testlib.fake_claude(tmp, {"sonnet": [flagged, good], "opus": [good]}))
+        config = _config(profiles={"a": {"kind": "claude-code", "model": "sonnet"},
+                                    "e": {"kind": "claude-code", "model": "opus"}},
+                          roles={"prose": "a", "escalate": "e"})
+        assert cw_run._run_small(d, {"target": "t"}, config, None) is True
+        assert fc.count("sonnet") == 2 and fc.count("opus") == 0
+        assert json.loads((d / "meta.json").read_text())["withheld"] == {"1": ["large.py"]}
+        by_path = {f["path"]: f for f in json.loads((d / "analysis.json").read_text())["files"]}
+        assert all(h["note"] == WITHHELD_NOTE for h in by_path["large.py"]["hunks"])
+
+
+def test_clean_pass_clears_a_stale_withheld_entry_and_reuse_recomputes_it():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo, base, head = cw_testlib.make_repo(tmp, {"foo.py": "a\nb\nc\n"}, {"foo.py": "a\nX\nc\n"})
+        d, manifest = _prepare_batches(tmp, repo, base, head)
+        entry = manifest[0]
+        seed = json.loads(Path(entry["seed"]).read_text())
+        cw_store.update_meta(d, lambda m: m.update({"withheld": {"1": ["foo.py"]}}))
+        with cw_testlib.StubLLM({"m": [cw_testlib.tool_call("submit_fragment", _passing_fragment(seed))]}) as stub:
+            config = _config(profiles={"a": stub.profile("m")}, roles={"analysis": "a", "escalate": "a"})
+            assert cw_run._run_batch(d, 1, entry, config, None) is True
+        assert "1" not in json.loads((d / "meta.json").read_text())["withheld"]
+        frag = _passing_fragment(seed)
+        frag["files"][0]["hunks"][0]["note"] = WITHHELD_NOTE
+        (d / "batches" / "fragment-1.json").write_text(json.dumps(frag))
+        assert cw_run._run_batch(d, 1, entry, _config(), None) is True
+        assert json.loads((d / "meta.json").read_text())["withheld"] == {"1": ["foo.py"]}
+
+
+def test_routed_retry_passes_withheld_paths_and_keeps_the_fragment_when_flagged(monkeypatch):
+    cw_testlib.require_posix()
+    with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+        repo, base, head = cw_testlib.make_repo(tmp, {"b.py": "x\ny\nz\n"}, {"b.py": "x\nB\nz\n"})
+        d, manifest = _prepare_batches(tmp, repo, base, head)
+        (d / "head").mkdir()
+        seed = json.loads(Path(manifest[0]["seed"]).read_text())
+        good = _passing_fragment(seed)
+        (d / "batches" / "fragment-1.json").write_text(json.dumps(good))
+        (d / "prose.json").write_text(json.dumps({"target": "t", "overview": "", "verdict": ""}))
+        cw_store.update_meta(d, lambda m: m.update({"withheld": {"1": ["b.py"]}}))
+        flagged = cw_testlib.claude_result(is_error=True, result="API Error: safeguards flagged this message")
+        stack.enter_context(cw_testlib.fake_claude(tmp, {"sonnet": [flagged] * 3}))
+        seen = []
+        real = cw_run._run_fragment_conversation
+        monkeypatch.setattr(cw_run, "_run_fragment_conversation",
+                            lambda *a, **k: (seen.append(k.get("stub_paths")), real(*a, **k))[1])
+        config = _config(profiles={"a": {"kind": "claude-code", "model": "sonnet"}}, roles={"analysis": "a"})
+        cw_run._route_and_finalize(d, {"target": "t"}, config, None, 1, manifest, ["b.py: role is empty"])
+        assert seen == [{"b.py"}]
+        assert json.loads((d / "batches" / "fragment-1.json").read_text()) == good
+        assert "batch 1 (b.py)" in json.loads((d / "meta.json").read_text())["steps"]["routed"]["remedy"]
 
 
 def test_llm_error_counts_as_one_failed_conversation_and_moves_on():

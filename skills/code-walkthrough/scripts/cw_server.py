@@ -335,7 +335,7 @@ def _tool_walkthrough_get(daemon, args):
         result["meta"] = {
             "target": meta.get("target"), "base": meta.get("base"), "head": meta.get("head"),
             "route": meta.get("route"), "batches": meta.get("batches"),
-            "batches_done": meta.get("batches_done"), "steps": _steps_public(meta),
+            "batches_done": meta.get("batches_done"), "withheld": meta.get("withheld"), "steps": _steps_public(meta),
             "usage": meta.get("usage", {}), "total": cw_store.usage_total(meta),
             "created_at": meta.get("created_at"), "updated_at": meta.get("updated_at"), "dir": str(d),
         }

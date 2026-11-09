@@ -572,3 +572,11 @@ def test_overview_blob_gate(text, names_length):
         assert str(len(text)) in problems[0]
     else:
         assert problems == []
+
+
+def test_withheld_note_is_accepted_though_it_shares_no_identifier_with_the_hunk():
+    from validate_analysis import WITHHELD_NOTE
+    diff = "diff --git a/f.py b/f.py\n--- a/f.py\n+++ b/f.py\n@@ -1,1 +1,1 @@\n-old_value = 1\n+new_value = 2\n"
+    frag = {"files": [{"path": "f.py", "role": "holds the settings", "hunks": [
+        {"header": "@@ -1,1 +1,1 @@", "note": WITHHELD_NOTE}]}]}
+    assert validate(diff, frag, fragment=True) == []
