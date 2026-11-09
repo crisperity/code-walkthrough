@@ -1832,6 +1832,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "resolve must be a list of strings"})
             return
         submit_only = payload.get("submit_only") is True
+        direct = payload.get("direct") is True
         daemon = self.server.cw_daemon
         if self._sibling_refusal(d):
             return
@@ -1862,7 +1863,11 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             if submit_only:
                 notes_items = []
-            if not notes_items and not waiting and (event != "COMMENT" or review_body.strip()):
+            if (direct and event == "COMMENT" and not review_body.strip() and not notes_items
+                    and not waiting and not (self._review_info(meta, d) or {}).get("review_id")):
+                self._send_json(400, {"error": "a comment-only review needs a summary"})
+                return
+            if not notes_items and not waiting and not direct and (event != "COMMENT" or review_body.strip()):
                 if not (self._review_info(meta, d) or {}).get("review_id"):
                     self._send_json(400, {
                         "error": "nothing to submit: there are no comments in the review",
@@ -1913,15 +1918,15 @@ class _Handler(BaseHTTPRequestHandler):
                 return
 
             submitted = False
-            if not (submit_only or delivered_ids) and waiting:
+            if not (submit_only or delivered_ids or direct) and waiting:
                 has_review = bool((self._review_info(meta, d) or {}).get("review_id"))
             else:
                 has_review = True
-            if (submit_only or delivered_ids or waiting) and has_review:
+            if (submit_only or delivered_ids or waiting or direct) and has_review:
                 body_path = d / "review-body.txt"
                 body_path.write_text(review_body)
                 result = cw_run._notes(meta, ["submit", "--state", state_path, "--event", event,
-                                              "--body-file", str(body_path)])
+                                              "--body-file", str(body_path)] + (["--open"] if direct else []))
                 record({"kind": "submit", "id": None, "ok": result.returncode == 0,
                         "event": event, "error": err_of(result)})
                 if result.returncode != 0:

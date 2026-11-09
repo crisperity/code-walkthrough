@@ -193,14 +193,6 @@
   details.hunk .hunk-count .hunk-count-resolved{color:var(--green)}
   details.hunk .hunk-was{flex:0 0 100%;color:var(--muted);font-size:var(--fs-xs);
     overflow-wrap:anywhere;white-space:normal}
-  /* GitHub-style Viewed checkbox, last in the row after .hunk-stat's own margin-left:auto has
-     already pushed that group to the right -- flex:none keeps it its own width beside it. The
-     label wraps the input so a click on either toggles it; wireViewedCheckboxes stops that
-     click from also bubbling into the summary's own open/close toggle. */
-  details.hunk .hunk-viewed{flex:none;display:inline-flex;align-items:center;gap:4px;
-    font-size:var(--fs-xs);color:var(--muted);cursor:pointer;user-select:none}
-  details.hunk .hunk-viewed-cb{accent-color:var(--accent);cursor:pointer;margin:0}
-  details.hunk .hunk-viewed-cb:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   /* Complexity chips, moved out of the summary into their own quiet row -- no card, no
      border, just muted inline furniture below the path a reader already read. */
   details.hunk .hunk-meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center;
@@ -237,7 +229,7 @@
      section rather than as another section. */
   .wt-group{display:flex;gap:8px;align-items:baseline;margin:24px 0 6px;padding:0;border:0;
     font-size:var(--fs-sm);color:var(--text)}
-  .wt-group .wt-count,.wt-group .wt-viewed{color:var(--muted);font-size:var(--fs-xs);font-weight:400}
+  .wt-group .wt-count{color:var(--muted);font-size:var(--fs-xs);font-weight:400}
   /* .wrap>p sets the prose size and outranks a bare class, so this has to name both or
      a group's one-line why renders at full paragraph size. */
   .wrap>p.wt-why{margin:0 0 10px;color:var(--muted);font-size:var(--fs-xs)}
@@ -417,15 +409,20 @@
     padding:8px 13px;font-size:var(--fs-xs);color:var(--muted);opacity:0;
     transition:opacity .25s ease;pointer-events:none;z-index:30}
   .vd-nav-toast.on{opacity:1}
-  #cw-live-banner{position:fixed;top:0;left:0;right:0;z-index:50;
-    background:var(--panel);border-bottom:1px solid var(--border);
-    padding:6px 14px;font-size:var(--fs-xs);color:var(--muted);
-    font-family:var(--mono);text-align:center}
+  #cw-live-banner{position:relative;display:flex;align-items:center;padding:0 10px;
+    font:var(--fs-xs) var(--mono);color:var(--muted)}
+  #cw-live-banner>summary{display:flex;align-items:center;justify-content:center;min-width:20px;height:38px;cursor:pointer;white-space:nowrap;list-style:none}
+  #cw-live-banner>summary::-webkit-details-marker{display:none}
+  #cw-live-banner>summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:8px}
+  #cw-live-banner .cw-live-dot{width:8px;height:8px;border-radius:50%;background:var(--green)}
   #cw-live-banner.failed{color:var(--red)}
-  #cw-live-reload{position:fixed;left:16px;bottom:16px;z-index:40;
-    display:inline-flex;align-items:center;height:38px;padding:0 14px;white-space:nowrap;
+  #cw-live-banner.failed .cw-live-dot{background:var(--red)}
+  .cw-live-body{position:absolute;right:0;bottom:calc(100% + 10px);z-index:1;width:max-content;max-width:min(420px,calc(100vw - 32px));
+    padding:8px 12px;background:var(--panel);border:1px solid var(--border);border-radius:8px;
+    box-shadow:0 6px 20px rgba(0,0,0,.35);white-space:normal;overflow-wrap:anywhere}
+  #cw-live-reload{display:inline-flex;align-items:center;height:30px;padding:0 12px;white-space:nowrap;
     background:var(--panel2);border:1px solid var(--accent);color:var(--text);border-radius:999px;
-    font:600 var(--fs-sm) system-ui;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.35)}
+    font:600 var(--fs-sm) system-ui;cursor:pointer}
   #cw-live-reload:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   /* Brief highlight so "Go to file" is visible arriving at the hunk, not just landing on it. */
   details.hunk.vd-flash{border-color:var(--accent)}
@@ -654,8 +651,12 @@
     border:1px solid var(--border);border-left:3px solid var(--yellow);border-radius:8px;
     padding:10px 16px;font-size:var(--fs-sm);color:var(--text)}
 
-  #cw-dock{position:fixed;right:16px;bottom:16px;z-index:40;
-    display:flex}
+  #cw-tray{position:fixed;right:16px;bottom:16px;z-index:41;display:flex;align-items:center;gap:6px;padding:4px;
+    background:var(--panel);border:1px solid var(--border);border-radius:999px;
+    box-shadow:0 6px 20px rgba(0,0,0,.35);max-width:calc(100vw - 32px)}
+  #cw-tray:not(:has(>:not([hidden]))){display:none}
+  #cw-tray>*+*{border-left:1px solid var(--border);padding-left:6px}
+  #cw-dock{display:flex}
   #cw-dock[hidden]{display:none}
   .cw-skel{position:relative;overflow:hidden;margin:12px 0;padding:12px 16px;
     border:1px dashed var(--border);border-radius:8px;color:var(--muted);font-size:var(--fs-sm)}
@@ -672,7 +673,7 @@
   #hr-comments-btn{display:inline-flex;align-items:center;gap:8px;height:38px;padding:0 14px;white-space:nowrap;
     background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:999px;
     font:600 var(--fs-sm) system-ui;cursor:pointer;user-select:none;-webkit-user-select:none;
-    box-shadow:0 6px 20px rgba(0,0,0,.35);transition:transform .15s,border-color .15s}
+    transition:transform .15s,border-color .15s}
   #hr-comments-btn:hover{border-color:var(--accent)}
   #hr-comments-btn:active{transform:scale(.97)}
   #hr-comments-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -825,7 +826,7 @@
   .cw-thread button:focus-visible,.cw-compose button:focus-visible,
   .cw-compose textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   :root{--cw-panel-w:clamp(360px,34vw,560px)}
-  /* above #cw-live-banner (z 50); the drafts bar (z 45) stays below */
+  /* above the tray (z 41); the drafts bar (z 45) stays below */
   #cw-panel{position:fixed;top:0;right:0;bottom:0;z-index:51;width:var(--cw-panel-w);
     display:flex;flex-direction:column;box-sizing:border-box;background:var(--panel);color:var(--text);
     border-left:1px solid var(--border);box-shadow:-8px 0 24px rgba(0,0,0,.35)}
@@ -872,7 +873,7 @@
   #cw-panel-compose{flex:none;min-width:0}
   #cw-panel .cw-thread{margin:0;padding:0;border-left:0;background:none}
   @media (min-width:601px) and (pointer:fine){
-    .cw-panel-open #cw-dock{right:calc(var(--cw-panel-w) + 16px)}
+    .cw-panel-open #cw-tray{right:calc(var(--cw-panel-w) + 16px)}
     .cw-panel-open #cw-toast{left:calc(50% - var(--cw-panel-w)/2)}
   }
   @media (min-width:1100px) and (pointer:fine){
@@ -892,7 +893,7 @@
     #cw-panel-grab::before{content:'';width:36px;height:4px;border-radius:2px;background:var(--border)}
     #cw-panel[data-sheet="collapsed"] #cw-panel-grab{height:56px}
     #cw-panel[data-sheet="expanded"] .cw-grab-text{display:none}
-    .cw-panel-open #cw-dock{display:none}
+    .cw-panel-open #cw-tray{display:none}
   }
   .cw-thread,.cw-compose{display:block;box-sizing:border-box;max-width:100%;margin:6px 0;
     padding:8px 10px;border-left:3px solid var(--purple);
@@ -1202,6 +1203,40 @@
   .cw-vis:not(.cw-ov-wrap):has(svg){cursor:zoom-in}
   .cw-vis img{max-width:100%}
   .cw-vis-group{margin:8px 0 14px}
+  figure.cw-vis-group{margin:8px 0 14px}
+  .cw-vis-group figcaption{margin-top:4px;font-size:var(--fs-sm);color:var(--muted)}
+  .cw-lead{margin:8px 0 12px;font-size:var(--fs-md)}
+  .cw-concept-more>summary{cursor:pointer;color:var(--muted);font-size:var(--fs-sm)}
+  .cw-viewtoggle{display:inline-flex;margin:8px 0;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+  .cw-viewtoggle button{border:0;background:var(--panel);color:inherit;font:inherit;padding:6px 14px;cursor:pointer}
+  .cw-viewtoggle button[aria-pressed=true],html:not(.cw-general) .cw-viewtoggle [data-cw-view=detailed]:not([aria-pressed]){background:var(--accent);color:var(--bg)}
+  html.cw-general details.hunk>:not(summary){display:none}
+  html.cw-general .cw-ov-detail{display:none}
+  .cw-gchips{margin-left:auto;display:inline-flex;gap:4px;font-weight:400}
+  .cw-gchip{background:var(--panel);color:var(--muted);border:1px solid var(--border);border-radius:999px;padding:2px 10px;font:inherit;font-size:var(--fs-xs);cursor:pointer}
+  .cw-gchip[aria-pressed=true].ok{border-color:var(--green);color:var(--green)}
+  .cw-gchip[aria-pressed=true].fix{border-color:var(--yellow);color:var(--yellow)}
+  #cw-bar.cw-sug-rc [data-ev=REQUEST_CHANGES],#cw-bar.cw-sug-ok [data-ev=APPROVE]{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+  #cw-bar{position:relative;display:flex;align-items:center}
+  #cw-bar[hidden],.cw-panel-open #cw-bar{display:none}
+  .cw-typing #cw-tray{visibility:hidden;pointer-events:none}
+  #cw-bar-toggle{display:inline-flex;align-items:center;gap:4px;height:38px;padding:0 14px;white-space:nowrap;
+    background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:999px;
+    font:600 var(--fs-sm) system-ui;cursor:pointer}
+  #cw-bar-toggle:hover,#cw-bar-toggle[aria-expanded=true]{border-color:var(--accent)}
+  #cw-bar-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  #cw-bar.cw-sug-ok #cw-bar-toggle{border-color:var(--green)}
+  #cw-bar.cw-sug-rc #cw-bar-toggle{border-color:var(--red)}
+  #cw-bar-count{color:var(--muted);font-weight:400}
+  #cw-bar-btns{position:absolute;right:0;bottom:calc(100% + 10px);z-index:1;width:230px;display:flex;flex-direction:column;gap:8px;
+    padding:8px;background:var(--panel);border:1px solid var(--border);border-radius:12px;box-shadow:0 6px 20px rgba(0,0,0,.35)}
+  #cw-bar-btns[hidden]{display:none}
+  #cw-bar-btns button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  #cw-bar-btns button{min-height:40px;padding:6px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:inherit;font:inherit;cursor:pointer}
+  #cw-bar-btns [data-ev=APPROVE]{border-color:var(--green);color:var(--green)}
+  #cw-bar-btns [data-ev=REQUEST_CHANGES]{border-color:var(--red);color:var(--red)}
+  body:has(#cw-tray>:not([hidden])) #plan-content{padding-bottom:88px}
+  body.cw-has-bar #plan-content{padding-bottom:88px}
 
   /* First-glance concepts (render.py concepts_html): a card per idea, picture then Before/After/Why. */
   .cw-concept{margin:12px 0;padding:12px;background:var(--panel);border:1px solid var(--border);border-radius:10px}
@@ -1313,11 +1348,7 @@
     .vd-level-toggle{min-height:44px;padding:10px 14px}
     details.hunk>summary{min-height:44px}
     #cw-wrap-toggle{min-height:44px;padding:10px 14px}
-    /* Same trick as h2.h2-row a below: padding grows the hit area, the equal negative margin
-       takes it back out of the layout, so the 13px checkbox stays and the row doesn't grow. */
-    details.hunk .hunk-viewed{padding:15px 8px;margin:-15px -8px}
-    #hr-comments-btn,#cw-live-reload{height:44px}
-    .cw-typing #cw-dock{visibility:hidden;pointer-events:none}
+    #hr-comments-btn,#cw-live-reload,#cw-bar-toggle{height:44px}
     #hr-comments-close{width:44px;height:44px;font-size:16px}
     #hr-comments-list button{min-height:44px}
     .cw-dc button{min-height:44px;padding:10px 14px}
@@ -1355,6 +1386,14 @@
     .chip-fix{padding:13px 7px;margin:-11px 0}
   }
 
+  @media (max-width:600px),(pointer:coarse){
+    body.cw-has-bar #cw-selbar{bottom:76px}
+    body.cw-has-bar #cw-toast{bottom:76px}
+    #cw-tray{left:8px;right:8px;bottom:calc(8px + env(safe-area-inset-bottom));justify-content:flex-end;max-width:none}
+    #cw-bar,#cw-live-banner{position:static}
+    .cw-live-body{left:0;right:auto}
+    #cw-bar-btns{left:0;width:auto}
+  }
   @media (prefers-reduced-motion:reduce){
     *,*::before,*::after{transition-duration:.01ms!important;animation-duration:.01ms!important;
       animation-iteration-count:1!important;scroll-behavior:auto!important}
@@ -1366,7 +1405,11 @@
 
 <!-- Ahead of #plan-content in source order (fixed visual position is unchanged) so a keyboard
      user reaches this button without tabbing through every commentable diff line first. -->
-<div id="cw-dock" hidden><button type="button" id="hr-comments-btn" aria-haspopup="dialog">Comments <span class="cw-dock-badge">0</span></button></div>
+<div id="cw-tray"><div id="cw-dock" hidden><button type="button" id="hr-comments-btn" aria-haspopup="dialog">Comments <span class="cw-dock-badge">0</span></button></div>
+
+<div id="cw-bar" hidden role="region" aria-label="Review"><button type="button" id="cw-bar-toggle" aria-expanded="false" aria-controls="cw-bar-btns" aria-haspopup="true">Review<span id="cw-bar-count"></span></button>
+  <div id="cw-bar-btns" hidden><button type="button" data-ev="COMMENT">Comment</button><button type="button" data-ev="REQUEST_CHANGES">Request changes</button><button type="button" data-ev="APPROVE">Approve</button></div></div></div>
+
 <dialog id="hr-comments" aria-label="Your comments">
   <div id="hr-comments-head">
     <span>Your comments</span>
@@ -1395,6 +1438,7 @@
 if(window.CW_LIVE){
   // Captured before any script paints skeletons or rewires blocks, so it matches the served HTML.
   window.__cwBase={state:(document.getElementById('hr-state')||{}).textContent||'',
+    glossary:(document.getElementById('cw-glossary')||{}).textContent||'',
     blocks:[...document.getElementById('plan-content').children].map((c,i)=>{ const h=c.outerHTML; c.dataset.cwb=i; return h; })};
 }
 </script>
@@ -2306,19 +2350,77 @@ if(window.CW_LIVE){
   function markPendingResolve(id){ pendingResolveSet.add(id); persistPendingResolve(); }
   function clearPendingResolve(id){ if(pendingResolveSet.delete(id)) persistPendingResolve(); }
 
-  // Viewed files, from the per-file checkbox below: same localStorage scheme as
-  // pendingResolveSet above, a page-scoped key holding a plain array of paths -- the two are
-  // exactly the same shape of fact.
-  function loadViewedSet(){
-    try{
-      const raw=localStorage.getItem(lsKey('hr-viewed',state.meta.id));
-      return raw?new Set(JSON.parse(raw)):new Set();
-    }catch(e){ return new Set(); }
+  const viewKey=()=>lsKey('cw-view',state.meta.id);
+  function applyView(v){
+    document.documentElement.classList.toggle('cw-general',v==='general');
+    document.querySelectorAll('[data-cw-view]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.cwView===v)));
   }
-  let viewedSet=loadViewedSet();
-  function persistViewed(){
-    try{ localStorage.setItem(lsKey('hr-viewed',state.meta.id), JSON.stringify([...viewedSet])); }catch(e){}
+  try{ applyView(localStorage.getItem(viewKey())==='general'?'general':'detailed'); }catch(e){ applyView('detailed'); }
+  document.addEventListener('click',e=>{
+    const b=e.target.closest&&e.target.closest('[data-cw-view]');
+    if(!b) return;
+    applyView(b.dataset.cwView);
+    try{ localStorage.setItem(viewKey(),b.dataset.cwView); }catch(x){}
+  });
+
+  let groupMarks={};
+  try{ groupMarks=JSON.parse(localStorage.getItem(lsKey('hr-groups',state.meta.id))||'{}')||{}; }catch(e){}
+  const groupHeads=()=>[...document.querySelectorAll('h3.wt-group')];
+  const headKey=h=>[...h.childNodes].filter(n=>!(n.classList&&(n.classList.contains('wt-count')||n.classList.contains('cw-gchips')))).map(n=>n.textContent).join('').trim();
+  const groupKeys=()=>{
+    const seen={};
+    return groupHeads().map(h=>{ const t=headKey(h); seen[t]=(seen[t]||0)+1; return seen[t]>1?t+'#'+seen[t]:t; });
+  };
+  const saveMarks=()=>{ try{ localStorage.setItem(lsKey('hr-groups',state.meta.id),JSON.stringify(groupMarks)); }catch(x){} };
+  const groupFileHunks=h=>{
+    const out=[];
+    for(let el=h.nextElementSibling; el&&!el.matches('h3.wt-group'); el=el.nextElementSibling)
+      if(el.matches('details.hunk')) out.push(el);
+    return out;
+  };
+  window.__cwGroupState=()=>{
+    const keys=groupKeys();
+    return {total:keys.length,ok:keys.filter(k=>groupMarks[k]==='ok').length,fix:keys.filter(k=>groupMarks[k]==='fix')};
+  };
+  function wireGroupChips(){
+    const heads=groupHeads();
+    const keys=groupKeys();
+    heads.forEach((h,i)=>{
+      let box=h.querySelector('.cw-gchips');
+      if(!box){
+        box=document.createElement('span'); box.className='cw-gchips';
+        for(const [k,t] of [['ok','Looks good'],['fix','Needs changes']]){
+          const b=document.createElement('button'); b.type='button'; b.className='cw-gchip '+k;
+          b.dataset.gmark=k; b.textContent=t; box.append(b);
+        }
+        h.append(box);
+      }
+      box.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(groupMarks[keys[i]]===b.dataset.gmark)));
+    });
+    const c=document.getElementById('cw-bar-count');
+    const s=window.__cwGroupState();
+    const full=!s.total?'Review':s.ok===s.total?'All '+s.total+' look good'
+      :(s.ok+s.fix.length)+'/'+s.total+' checked'+(s.fix.length?' · '+s.fix.length+' needs changes':'');
+    if(c){ c.textContent=s.total?' · '+(s.ok+s.fix.length)+'/'+s.total:''; c.parentElement.title=full; }
+    const bar=document.getElementById('cw-bar');
+    if(bar){
+      bar.classList.toggle('cw-sug-rc',s.fix.length>0);
+      bar.classList.toggle('cw-sug-ok',s.total>0&&s.ok===s.total);
+    }
   }
+  window.__cwGroupUi=wireGroupChips;
+  document.addEventListener('click',e=>{
+    const b=e.target.closest&&e.target.closest('[data-gmark]');
+    const h=b&&b.closest('h3.wt-group');
+    if(!h) return;
+    e.preventDefault(); e.stopPropagation();
+    const k=groupKeys()[groupHeads().indexOf(h)];
+    if(groupMarks[k]===b.dataset.gmark) delete groupMarks[k]; else groupMarks[k]=b.dataset.gmark;
+    if(groupMarks[k]==='ok') groupFileHunks(h).forEach(d=>{ d.open=false; });
+    saveMarks();
+    wireGroupChips();
+  },true);
+  wireGroupChips();
 
   // Mirrors notes.py's own resolve mutation shape (see the module docstring): the thread id
   // travels as a variable, never interpolated into the query string.
@@ -2709,6 +2811,26 @@ if(window.CW_LIVE){
       }
     }
   }
+
+  const pageGlossary=(()=>{
+    try{ const g=JSON.parse((document.getElementById('cw-glossary')||{}).textContent||'[]'); return Array.isArray(g)?g:[]; }
+    catch(e){ return []; }
+  })();
+  const mergeTerms=own=>{
+    const have=new Set((own||[]).map(t=>String(t&&t.term).toLowerCase()));
+    return (own||[]).concat(pageGlossary.filter(t=>!have.has(String(t&&t.term).toLowerCase())));
+  };
+  function markPage(){
+    if(!pageGlossary.length) return;
+    const units=[...document.querySelectorAll('.cw-concept-ba dd,.wt-why,.hunk-note')];
+    for(const f of document.querySelectorAll('.facts .fact'))
+      if(/^(Verdict|Summary)$/.test(f.firstElementChild?f.firstElementChild.textContent:'')) units.push(f.lastElementChild);
+    for(const h of document.querySelectorAll('#plan-content h2'))
+      if(h.textContent==='Overview') for(let n=h.nextElementSibling;n&&/^(P|UL)$/.test(n.tagName);n=n.nextElementSibling) units.push(n);
+    for(const u of units) if(!u.dataset.cwg){ u.dataset.cwg='1'; markTerms(u,pageGlossary); }
+  }
+  window.__cwMarkPage=markPage;
+  markPage();
 
   const termPop={el:null,anchor:null,timer:0,watch:null};
   function hideTerm(){
@@ -3642,52 +3764,6 @@ if(window.CW_LIVE){
     dirtyBanner.hidden = !(state.meta&&state.meta.dirty);
   }
 
-  // Group totals for the "N/M viewed" count beside each .wt-group heading (walkthrough.py
-  // ships the span empty, see there). The DOM carries no explicit group->file link, so this
-  // walks siblings from one heading to the next, stopping at the next heading.
-  function groupFileHunks(heading){
-    const hunks=[];
-    for(let el=heading.nextElementSibling; el&&!el.matches('h3.wt-group'); el=el.nextElementSibling){
-      if(el.matches('details.hunk')) hunks.push(el);
-    }
-    return hunks;
-  }
-
-  function updateGroupViewed(){
-    document.querySelectorAll('h3.wt-group').forEach(heading=>{
-      const out=heading.querySelector('.wt-viewed');
-      const hunks=groupFileHunks(heading);
-      if(!out||!hunks.length) return;
-      const viewed=hunks.filter(d=>{
-        const cb=d.querySelector('.hunk-viewed-cb');
-        return cb&&cb.checked;
-      }).length;
-      out.textContent=viewed+'/'+hunks.length+' viewed';
-    });
-  }
-
-  // Checking collapses the file, GitHub's own Viewed behaviour; unchecking leaves it open --
-  // the reader may already be looking at it again, so nothing should force it shut.
-  function wireViewedCheckboxes(){
-    document.querySelectorAll('.hunk-viewed').forEach(label=>{
-      // Stops the click before it reaches the <summary> ancestor and toggles the block --
-      // same fix as the "summary a" listener further down, just for this control.
-      label.addEventListener('click',e=>e.stopPropagation());
-      const cb=label.querySelector('.hunk-viewed-cb');
-      const details=label.closest('details.hunk');
-      const pathEl=details&&details.querySelector('.hunk-path');
-      const path=pathEl?pathEl.textContent.trim():'';
-      if(!cb||!details||!path) return;
-      if(viewedSet.has(path)){ cb.checked=true; details.open=false; }
-      cb.addEventListener('change',()=>{
-        if(cb.checked){ viewedSet.add(path); details.open=false; } else viewedSet.delete(path);
-        persistViewed();
-        updateGroupViewed();
-      });
-    });
-    updateGroupViewed();
-  }
-
   // A row inside a collapsed <details class="hunk"> isn't focusable, so .focus() below would
   // be a silent no-op -- walk every ancestor <details> open first.
   function openAncestorDetails(el){
@@ -3720,6 +3796,20 @@ if(window.CW_LIVE){
     if(!postBtn||!dlg||!close||!notesList||!resolvesList||!sendBtn||!status||!summary||!partial) return;
     postBtn.hidden=!canGhCommand;
     postBtn.textContent='Submit review';
+    const bar=$$('cw-bar');
+    if(bar){
+      bar.hidden=!canGhCommand;
+      document.body.classList.toggle('cw-has-bar',!!canGhCommand);
+      const tg=$$('cw-bar-toggle'), pop=$$('cw-bar-btns');
+      const setOpen=o=>{ pop.hidden=!o; tg.setAttribute('aria-expanded',String(o)); };
+      tg.addEventListener('click',()=>setOpen(pop.hidden));
+      bar.querySelectorAll('[data-ev]').forEach(b=>b.addEventListener('click',()=>{ setOpen(false); start(b,b.dataset.ev); }));
+      document.addEventListener('click',e=>{ if(!pop.hidden&&!bar.contains(e.target)) setOpen(false); });
+      document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!pop.hidden){ e.preventDefault(); e.stopPropagation(); setOpen(false); tg.focus(); } },true);
+      new MutationObserver(()=>{ if(bar.hidden||document.documentElement.classList.contains('cw-panel-open')) setOpen(false); })
+        .observe(document.documentElement,{attributes:true,attributeFilter:['class']});
+      new MutationObserver(()=>{ if(bar.hidden) setOpen(false); }).observe(bar,{attributes:true,attributeFilter:['hidden']});
+    }
 
     const plural=(n,w)=>n+' '+w+(n===1?'':'s');
     const firstLine=t=>String(t||'').split('\n')[0];
@@ -3740,7 +3830,7 @@ if(window.CW_LIVE){
     refreshPanelSubmit=updatePanelSubmit;
 
     let nonce=null, nonceIds=null, lastResolves=[], full=[], excluded=new Set(), review={pending:false,comments:0}, own=false,
-      loading=false, waiting=false, posting=false, starting=false, done=false, seq=0, opener=postBtn, slots=new Map(), failedNoteIds=[];
+      loading=false, waiting=false, posting=false, starting=false, done=false, seq=0, opener=postBtn, slots=new Map(), failedNoteIds=[], viaBar=false;
 
     const selectedIds=()=>full.filter(n=>!excluded.has(n.id)).map(n=>n.id);
     const say=(t,err,busy)=>{ status.textContent=t; status.classList.toggle('err',!!err); spin.hidden=!busy; };
@@ -3751,7 +3841,7 @@ if(window.CW_LIVE){
     function syncSend(){
       const ev=selEvent(), sel=selectedIds().length, n=sel+lastResolves.length;
       const rc=ev==='REQUEST_CHANGES'&&!summary.value.trim();
-      const idle=!sel&&!lastResolves.length&&!review.pending;
+      const idle=!sel&&!lastResolves.length&&!review.pending&&!(viaBar&&(ev!=='COMMENT'||summary.value.trim()));
       dlg.dataset.ev=ev;
       sendBtn.textContent=VERDICT[ev]+(n?' · '+n:'');
       sendBtn.disabled=posting||done||rc||idle;
@@ -3870,21 +3960,28 @@ if(window.CW_LIVE){
       full=localDrafts(); renderRows();
     }
 
-    function start(from){
+    function start(from,ev){
       if(starting||posting||dlg.open) return;
       starting=true;
-      opener=from;
+      opener=from; viaBar=!!ev;
       from.disabled=true;
       putNotesNow(false).then(()=>{
         from.disabled=false; starting=false;
         if(dlg.open) return;
         resetDialog();
+        const g=window.__cwGroupState?window.__cwGroupState():{total:0,ok:0,fix:[]};
+        summary.value=g.fix.map(t=>'- '+t+': needs changes').join('\n');
+        const pick=ev&&evRadios.find(r=>r.value===ev);
+        if(pick) pick.checked=true;
+        const open=g.total-g.ok-g.fix.length;
+        const warn=ev==='APPROVE'&&(open||g.fix.length)
+          ?[open&&open+(open===1?' group':' groups')+' unchecked',g.fix.length&&g.fix.length+' marked Needs changes'].filter(Boolean).join(', '):'';
         dlg.showModal();
-        preview(false);
+        preview(false).then(()=>{ if(warn&&nonce!=null) say(warn); });
       },()=>{ from.disabled=false; starting=false; });
     }
     postBtn.addEventListener('click',()=>start(postBtn));
-    openSubmitReview=from=>start(from||postBtn);
+    openSubmitReview=(from,ev)=>start(from||postBtn,ev);
 
     evRadios.forEach(r=>r.addEventListener('change',syncSend));
     summary.addEventListener('input',syncSend);
@@ -3902,7 +3999,7 @@ if(window.CW_LIVE){
     dlg.addEventListener('close',()=>{
       seq++; loading=false; waiting=false;
       const o=opener&&opener.isConnected&&!opener.hidden&&!opener.disabled&&opener.offsetParent!==null?opener
-        :document.getElementById('hr-comments-btn')||document.body;
+        :(opener&&opener.closest('#cw-bar-btns')&&document.getElementById('cw-bar-toggle'))||document.getElementById('hr-comments-btn')||document.body;
       o.focus();
     });
 
@@ -4012,7 +4109,7 @@ if(window.CW_LIVE){
       if(!covered()) return submit();
       partial.hidden=true; prefillRows();
       return postJson({nonce,resolve:[...pendingResolveSet],ids:selectedIds(),
-        event:selEvent(),body:summary.value});
+        event:selEvent(),body:summary.value,direct:viaBar});
     }
     function retry(){
       partial.hidden=true;
@@ -4026,7 +4123,7 @@ if(window.CW_LIVE){
     }
     function submitNow(){
       partial.hidden=true;
-      return postJson({submit_only:true,event:selEvent(),body:summary.value,resolve:[...pendingResolveSet]});
+      return postJson({submit_only:true,event:selEvent(),body:summary.value,resolve:[...pendingResolveSet],direct:viaBar});
     }
     sendBtn.addEventListener('click',submit);
     nowBtn.addEventListener('click',submitNow);
@@ -5336,7 +5433,7 @@ if(window.CW_LIVE){
         d.append(mk('p','cw-turn-a cw-turn-err','Error: '+(r.error||'unknown')+(r.remedy?' ('+r.remedy+')':'')));
       } else {
         const a=mk('div','cw-turn-a cw-md');
-        a.append(mdEl(r.answer||'',r.terms));
+        a.append(mdEl(r.answer||'',mergeTerms(r.terms)));
         if(r.status==='cancelled') a.append(mk('span','cw-stopped','(stopped)'));
         d.append(a);
       }
@@ -6205,7 +6302,7 @@ if(window.CW_LIVE){
     const pCompose=mk('div'); pCompose.id='cw-panel-compose';
     pThread.append(pBody,pCompose);
     panel.append(grab,pHead,pAccess,pList,pThread);
-    $('cw-dock').after(panel);
+    $('cw-tray').after(panel);
 
     const resizer=mk('div'); resizer.id='cw-panel-resize'; resizer.tabIndex=0;
     resizer.setAttribute('role','separator'); resizer.setAttribute('aria-orientation','vertical');
@@ -6767,7 +6864,6 @@ if(window.CW_LIVE){
     });
   }
   wireSibling();
-  wireViewedCheckboxes();
   render();
 })();
 </script>
@@ -6940,7 +7036,7 @@ armCtxHint();
   if(window.CW_LIVE){
     const LIVE=window.CW_LIVE;
     // Mirrors cw_run.py's STEPS tuple; keep in sync.
-    const STEP_ORDER=['capture','split','skeleton','worktree','complexity','symdelta','visuals','small',
+    const STEP_ORDER=['capture','split','skeleton','worktree','complexity','symdelta','visuals','glossary','small',
       'prose','routed','comments','threads','thread','prepare','render','run'];
     let liveStatus=LIVE.status, liveError=LIVE.error, liveRemedy=LIVE.remedy;
     let liveSteps=LIVE.steps||{}, liveBatches=LIVE.batches||{done:0,total:0};
@@ -6958,7 +7054,12 @@ armCtxHint();
 
     function ensureBanner(){
       let el=document.getElementById('cw-live-banner');
-      if(!el){ el=document.createElement('div'); el.id='cw-live-banner'; document.body.prepend(el); }
+      if(!el){
+        el=document.createElement('details'); el.id='cw-live-banner';
+        el.append(document.createElement('summary'),document.createElement('div'));
+        el.lastChild.className='cw-live-body';
+        document.getElementById('cw-tray').prepend(el);
+      }
       return el;
     }
 
@@ -6976,8 +7077,16 @@ armCtxHint();
         if(liveError) text+=' \u2014 '+liveError;
         if(liveRemedy) text+=' (remedy: '+liveRemedy+')';
       }
-      el.classList.toggle('failed',liveStatus==='failed');
-      el.textContent=text;
+      const failed=liveStatus==='failed';
+      const wasFailed=el.classList.contains('failed');
+      el.classList.toggle('failed',failed);
+      const dot=document.createElement('span'); dot.className='cw-live-dot'; dot.setAttribute('aria-hidden','true');
+      let label=liveStatus;
+      if(running) label+=' \u00b7 '+running.split('-')[0]+' '+(liveBatches.done||0)+'/'+(liveBatches.total||0);
+      el.firstChild.replaceChildren(dot);
+      el.firstChild.title=label; el.firstChild.setAttribute('aria-label','Live status: '+label);
+      el.lastChild.textContent=text;
+      if(failed&&!wasFailed) el.open=true;
       LIVE.status=liveStatus;
       paintSkeletons();
     }
@@ -7030,7 +7139,7 @@ armCtxHint();
       btn.id='cw-live-reload';
       btn.textContent='Updated, reload';
       btn.addEventListener('click',doReload);
-      document.body.appendChild(btn);
+      ensureBanner().after(btn);
     }
 
     // BOUND must list every block that load-time scripts bind to, or an in-place swap breaks it.
@@ -7044,7 +7153,8 @@ armCtxHint();
       if(!base||!root||!nextRoot) return false;
       const nextState=(next.getElementById('hr-state')||{}).textContent||'';
       const blocks=[...nextRoot.children];
-      if(nextState!==base.state||blocks.length!==base.blocks.length) return false;
+      const nextGlossary=(next.getElementById('cw-glossary')||{}).textContent||'';
+      if(nextState!==base.state||nextGlossary!==base.glossary||blocks.length!==base.blocks.length) return false;
       const changed=[];
       for(let i=0;i<blocks.length;i++){
         if(blocks[i].outerHTML===base.blocks[i]) continue;
@@ -7060,7 +7170,9 @@ armCtxHint();
         o.replaceWith(fresh);
         fresh.querySelectorAll('form.cw-ctx-link').forEach(wireCtxLink);
       });
-      window.__cwBase={state:nextState,blocks:blocks.map(b=>b.outerHTML)};
+      window.__cwBase={state:nextState,glossary:nextGlossary,blocks:blocks.map(b=>b.outerHTML)};
+      if(window.__cwMarkPage) window.__cwMarkPage();
+      if(window.__cwGroupUi) window.__cwGroupUi();
       armCtxHint();
       window.scrollTo(0,y);
       return true;

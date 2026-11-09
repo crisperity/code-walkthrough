@@ -427,21 +427,12 @@ def test_group_titles_reach_the_page():
     assert "Everything else" in render_html(groups, files, {})
 
 
-def test_group_heading_carries_an_empty_viewed_placeholder():
-    # The template's JS fills this live from localStorage; the render knows nothing about
-    # viewed state, so it ships empty, same convention as .hunk-count.
+def test_per_file_viewed_markup_is_gone():
     order, files = parsed()
     groups = story(order, files, [{"title": "Session handling", "paths": ["src/auth.py"]}], None)
 
-    assert '<span class="wt-viewed"></span>' in render_html(groups, files, {})
-
-
-def test_every_hunk_summary_carries_a_viewed_checkbox():
-    order, files = parsed()
-    out = render_html(flat(order, files), files, {})
-
-    assert out.count('<label class="hunk-viewed"') == 2
-    assert out.count('<input type="checkbox" class="hunk-viewed-cb">') == 2
+    for out in (render_html(groups, files, {}), render_html(flat(order, files), files, {})):
+        assert "wt-viewed" not in out and "hunk-viewed" not in out
 
 
 # ---- group headings and picture slots ----
@@ -757,14 +748,6 @@ def test_renamed_file_header_row_carries_no_arrow_and_a_pure_hunk_path():
     # .hunk-path must stay exactly the new path: the page's comment JS reads its textContent
     # verbatim as the path field of every PR review comment on that file.
     assert '<span class="hunk-path">corelib/ratelimit/ratelimit_config/config.go</span>' in out
-
-
-def test_viewed_label_precedes_hunk_was_so_it_stays_on_the_header_row():
-    order, files = parse_hunks(RENAME_DIFF)
-    renames = rename_index(RENAME_DIFF)
-    out = render_html(flat(order, files), files, {}, renames=renames)
-
-    assert out.index('<label class="hunk-viewed"') < out.index('<span class="hunk-was">')
 
 
 def test_render_html_optional_inputs_default_to_none():

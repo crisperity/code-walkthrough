@@ -398,10 +398,7 @@ def render_html(groups, files, by_path, open_count=DEFAULT_OPEN, links=None, com
             out.append(f'<h3 class="wt-group">'
                        f'{_codeify(escape(title))} '
                        f'<span class="wt-count">{len(paths)} '
-                       f'file{"s" if len(paths) != 1 else ""}</span> '
-                       # Filled and kept live client-side (updateGroupViewed in the
-                       # template): viewed state lives in the reader's own localStorage.
-                       f'<span class="wt-viewed"></span></h3>')
+                       f'file{"s" if len(paths) != 1 else ""}</span></h3>')
             if why:
                 out.append(f'<p class="wt-why">{_codeify(escape(why))}</p>')
         if getattr(group, "idx", None) is not None:
@@ -451,14 +448,6 @@ def render_html(groups, files, by_path, open_count=DEFAULT_OPEN, links=None, com
             else:
                 out.append(f'      <span class="hunk-stat"><span class="add">+{file["added"]}'
                            f'</span> <span class="del">-{file["removed"]}</span></span>')
-            # GitHub-style Viewed checkbox: wireViewedCheckboxes reads the path from this
-            # hunk's own .hunk-path rather than a duplicate attribute here; checking it
-            # collapses the file and persists to localStorage the same way comments do.
-            # Emitted before .hunk-was so Viewed always lands on the header row right after
-            # .hunk-stat: .hunk-was's flex-basis:100% forces a new row, and anything emitted
-            # after it would wrap onto a third line instead.
-            out.append('      <label class="hunk-viewed" title="Mark this file as viewed">'
-                       '<input type="checkbox" class="hunk-viewed-cb"> Viewed</label>')
             if old_path:
                 # Sibling of .hunk-path, never inside it: the page's comment JS reads
                 # .hunk-path's textContent as the literal PR-comment path, which must stay pure.

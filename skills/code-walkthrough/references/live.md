@@ -9,10 +9,10 @@ worker conversations are no longer this agent's own subagent spawns: every diff 
 prompt and every file a worker reads goes to whichever model backend `config.json` points at. A
 `claude-code` role runs `claude -p` under the same account and routing your own Claude Code uses,
 whether that's a subscription, an API key, or a gateway set in `settings.json`'s `env`, and counts
-against that; the page banner shows its tokens only, with no `cost_usd`. An `openai` role instead
+against that; the page's status dot (tooltip, click for the full line) shows its tokens only, with no `cost_usd`. An `openai` role instead
 bills per token against that profile's own API key: only an Ollama or vLLM instance on the same
 machine keeps that traffic local, a proxy, OpenRouter or any hosted API sees it the same as any
-other client. `walkthrough_get`'s `usage` and the page banner show the running total either way,
+other client. `walkthrough_get`'s `usage` and the page's status line show the running total either way,
 with a `cost_usd` once an openai profile carries `price_per_mtok`.
 
 ## Setup
@@ -122,6 +122,9 @@ holds copies of `analysis.json` and `raw.diff` the agent may read.
 Step `visuals` runs after the analysis and the background steps, authors the PR picture and one
 picture per group into `visuals.json`, and never fails the run: on error the step is marked
 `failed` and the page has no pictures. It skips when `visuals.json` already exists.
+Step `glossary` runs in parallel with `visuals`, picks up to 12 terms of the page text into
+`glossary.json` (hover definitions on every prose block, merged with a reply's own terms) and is
+failure-isolated the same way.
 `python3 scripts/cw_run.py visuals --dir <dir> --force` re-runs it, then `pipeline.py render`
 rebuilds the page. What a picture may contain: `references/graphs.md`.
 
