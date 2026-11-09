@@ -39,7 +39,7 @@ import state  # noqa: E402
 import symdelta as symdelta_mod  # noqa: E402
 import visuals  # noqa: E402
 from symdelta import add_worktree, remove_worktree  # noqa: E402
-from validate_analysis import EMPTY_NOTE_FLOOR, HUNK_PREFIX, parse_hunks, validate  # noqa: E402
+from validate_analysis import EMPTY_NOTE_FLOOR, HUNK_PREFIX, WITHHELD_NOTE, parse_hunks, validate  # noqa: E402
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 SKILL_DIR = SCRIPTS_DIR.parent
@@ -593,10 +593,49 @@ def _request_render(d, fragments=None):
         renderer.request(fragments or [])
 
 
-def _submit_fragment_handler(d, n, batch_diff, seed, state):
+def _withhold(fragment, paths):
+    for f in fragment["files"]:
+        if f["path"] in paths:
+            for h in f["hunks"]:
+                h["note"] = WITHHELD_NOTE
+
+
+MAX_STUB_ROUNDS = 5
+
+
+def _record_withheld(d, n, withheld):
+    def fn(m):
+        if withheld:
+            m.setdefault("withheld", {})[str(n)] = withheld
+        else:
+            m.get("withheld", {}).pop(str(n), None)
+    cw_store.update_meta(d, fn)
+
+
+def _withheld_of(fragment):
+    return sorted(f["path"] for f in fragment["files"]
+                  if any(h.get("note") == WITHHELD_NOTE for h in f["hunks"]))
+
+
+def _retry_flagged(attempt, diff, stub_paths):
+    """Run `attempt()` -> (..., err); on a flagged error stub the largest file not yet withheld
+    and run again, up to MAX_STUB_ROUNDS files. `attempt` reads `stub_paths`, which this fills."""
+    sizes = {path: len(chunk) for path, chunk in fanout.split_chunks(diff)}
+    while True:
+        result = attempt()
+        if getattr(result[-1], "kind", None) != "flagged" or len(stub_paths) >= MAX_STUB_ROUNDS:
+            return result
+        left = [p for p in sizes if p not in fanout.stub_diff(diff, stub_paths)[1]]
+        if not left:
+            return result
+        stub_paths.add(max(left, key=sizes.get))
+
+
+def _submit_fragment_handler(d, n, batch_diff, seed, state, withheld=()):
     def handler(args):
         state["attempt"] += 1
         fragment = _copy_into_seed(seed, args)
+        _withhold(fragment, withheld)
         problems = validate(batch_diff, fragment, fragment=True)
         state["fragment"] = fragment
         state["problems"] = problems
@@ -613,7 +652,7 @@ def _submit_fragment_handler(d, n, batch_diff, seed, state):
     return handler
 
 
-def _run_fragment_conversation(d, n, entry, config, on_event, role, extra_lines=None, hint=None):
+def _run_fragment_conversation(d, n, entry, config, on_event, role, extra_lines=None, hint=None, stub_paths=()):
     profile = cw_store.role_profile(config, role, agent=_agent_of(d))
     if profile is None:
         return False, None, [f"no profile for role {role}"], None
@@ -625,7 +664,8 @@ def _run_fragment_conversation(d, n, entry, config, on_event, role, extra_lines=
     tools = tools + [_fragment_submit_tool()]
     batch_prompt = (SKILL_DIR / "prompts" / "batch.md").read_text()
     system_prompt = batch_prompt + DELIVERY_SUFFIX.format(tool="submit_fragment")
-    user_text = f"```diff\n{batch_diff}\n```\n\n```json\n{json.dumps(seed, indent=2)}\n```"
+    shown, withheld = fanout.stub_diff(batch_diff, stub_paths)
+    user_text = f"```diff\n{shown}\n```\n\n```json\n{json.dumps(seed, indent=2)}\n```"
     if extra_lines:
         user_text += ("\n\nThe central gate reported these problems with your files:\n"
                        + "\n".join(extra_lines))
@@ -636,7 +676,7 @@ def _run_fragment_conversation(d, n, entry, config, on_event, role, extra_lines=
 
     state = {"attempt": 0, "ok": False, "fragment": None, "problems": []}
     local_handlers = dict(handlers)
-    local_handlers["submit_fragment"] = _submit_fragment_handler(d, n, batch_diff, seed, state)
+    local_handlers["submit_fragment"] = _submit_fragment_handler(d, n, batch_diff, seed, state, withheld)
     messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}]
     error = None
     exc = None
@@ -661,6 +701,7 @@ def _run_batch(d, n, entry, config, on_event):
     if fragment_path.exists():
         frag = cw_store.read_json(fragment_path, default=None)
         if frag is not None and not validate(batch_diff, frag, fragment=True):
+            _record_withheld(d, n, _withheld_of(frag))
             cw_store.update_meta(
                 d, lambda m: (m.setdefault("batches_done", []).append(n) if n not in m.get("batches_done", []) else None))
             _emit_step(d, on_event, name, "ok", reused=True)
@@ -672,6 +713,7 @@ def _run_batch(d, n, entry, config, on_event):
         frag = _copy_into_seed(json.loads(Path(entry["seed"]).read_text()), {})
         if not validate(batch_diff, frag, fragment=True):
             fragment_path.write_text(json.dumps(frag, indent=2))
+            _record_withheld(d, n, _withheld_of(frag))
             cw_store.update_meta(
                 d, lambda m: (m.setdefault("batches_done", []).append(n) if n not in m.get("batches_done", []) else None))
             _emit_step(d, on_event, name, "ok", reused=True, carried=True)
@@ -684,14 +726,17 @@ def _run_batch(d, n, entry, config, on_event):
     fragment = None
     problems = []
     last_error = None
+    stub_paths = set()
     for role in ("analysis", "escalate"):
         profile = cw_store.role_profile(config, role, agent=_agent_of(d))
         if profile is None:
             continue
         attempts += 1
         model_used = profile.get("model")
-        ok, frag, probs, err = _run_fragment_conversation(d, n, entry, config, on_event, role,
-                                                          hint=carry.get("pending"))
+        ok, frag, probs, err = _retry_flagged(
+            lambda: _run_fragment_conversation(
+                d, n, entry, config, on_event, role, hint=carry.get("pending"), stub_paths=stub_paths),
+            batch_diff, stub_paths)
         if ok:
             passed, fragment = True, frag
             break
@@ -699,13 +744,20 @@ def _run_batch(d, n, entry, config, on_event):
             fragment, problems = frag, probs
         if err is not None:
             last_error = err
+            if getattr(err, "kind", None) == "flagged":
+                break
 
+    withheld = sorted(fanout.stub_diff(batch_diff, stub_paths)[1])
     if passed:
-        _emit_step(d, on_event, name, "ok", attempts=attempts, model=model_used)
+        _record_withheld(d, n, withheld)
+        _emit_step(d, on_event, name, "ok", attempts=attempts, model=model_used, withheld=withheld or None)
         return True
     if not problems and last_error is not None:
+        remedy = last_error.remedy
+        if getattr(last_error, "kind", None) == "flagged":
+            remedy = f"batch {n} ({', '.join(entry['files'])}): {remedy}"
         _emit_step(d, on_event, name, "failed", attempts=attempts, model=model_used,
-                    error=str(last_error), remedy=last_error.remedy)
+                    error=str(last_error), remedy=remedy)
         return False
     _emit_step(d, on_event, name, "failed", attempts=attempts, model=model_used, lines=problems)
     return False
@@ -1246,19 +1298,27 @@ def _route_and_finalize(d, meta, config, on_event, batch_count, manifest, other_
                 batches_to_retry.add(n)
 
     _emit_step(d, on_event, "routed", "running")
-    for n in batches_to_retry:
+    withheld = (cw_store.read_meta(d) or {}).get("withheld") or {}
+    flagged = []
+    for n in sorted(batches_to_retry):
         entry = manifest[n - 1]
         lines = file_lines_by_batch.get(n, []) + floor_lines
-        _run_fragment_conversation(d, n, entry, config, on_event, "analysis", extra_lines=lines)
+        *_, err = _run_fragment_conversation(
+            d, n, entry, config, on_event, "analysis", extra_lines=lines,
+            stub_paths=set(withheld.get(str(n), [])))
+        if getattr(err, "kind", None) == "flagged":
+            flagged.append(f"batch {n} ({', '.join(entry['files'])})")
+    note = ("model safeguards flagged the routed retry of " + "; ".join(flagged)
+            + ": kept the earlier fragment") if flagged else None
 
     prose = cw_store.read_json(d / "prose.json", default={})
     fragment_paths = _fragment_paths(d, batch_count)
     merged, problems = _merge_and_validate(d, fragment_paths, prose)
     if not problems:
         (d / "analysis.json").write_text(json.dumps(merged, indent=2))
-        _emit_step(d, on_event, "routed", "ok")
+        _emit_step(d, on_event, "routed", "ok", remedy=note)
         return True, []
-    _emit_step(d, on_event, "routed", "failed", lines=problems)
+    _emit_step(d, on_event, "routed", "failed", remedy=note, lines=problems)
     return False, problems
 
 
@@ -1273,8 +1333,6 @@ def _run_small(d, meta, config, on_event):
     batch_prompt = (SKILL_DIR / "prompts" / "batch.md").read_text()
     prose_prompt = (SKILL_DIR / "prompts" / "prose.md").read_text()
     system_prompt = batch_prompt + "\n\n" + prose_prompt + DELIVERY_SUFFIX.format(tool="submit_analysis")
-    user_text = (f"```diff\n{raw_diff}\n```\n\n```json\n{json.dumps(seed, indent=2)}\n```"
-                 f"\n\nNumstat:\n{numstat}")
 
     attempts = 0
     model_used = None
@@ -1283,75 +1341,96 @@ def _run_small(d, meta, config, on_event):
     prose_json = None
     problems = []
     last_exc = None
+    stub_paths = set()
+    entry_paths = [f["path"] for f in seed["files"]]
     for role in ("prose", "escalate"):
         profile = cw_store.role_profile(config, role, agent=_agent_of(d))
         if profile is None:
             continue
         attempts += 1
         model_used = profile.get("model")
-        state = {"attempt": 0, "ok": False, "analysis": None, "prose": None, "problems": []}
 
-        def handler(args, state=state):
-            state["attempt"] += 1
-            args = args if isinstance(args, dict) else {}
-            fragment = _copy_into_seed(seed, args)
-            if not validate(raw_diff, fragment, fragment=True):
-                (d / "batches" / "fragment-1.json").write_text(json.dumps(fragment, indent=2))
-                cw_store.update_meta(
-                    d, lambda m: (m.setdefault("batches_done", []).append(1) if 1 not in m.get("batches_done", []) else None))
-                _request_render(d, [1])
+        def attempt(role=role, profile=profile):
+            shown, withheld = fanout.stub_diff(raw_diff, stub_paths)
+            user_text = (f"```diff\n{shown}\n```\n\n```json\n{json.dumps(seed, indent=2)}\n```"
+                         f"\n\nNumstat:\n{numstat}")
+            state = {"attempt": 0, "ok": False, "analysis": None, "prose": None, "problems": []}
 
-            prose = {
-                "target": meta["target"],
-                "overview": args.get("overview") if isinstance(args.get("overview"), str) else "",
-                "verdict": args.get("verdict") if isinstance(args.get("verdict"), str) else "",
-            }
-            if isinstance(args.get("groups"), list):
-                prose["groups"] = args["groups"]
-            full = {**{k: v for k, v in prose.items() if k != "target"}, "target": prose["target"],
-                    "files": fragment["files"]}
-            full_problems = validate(raw_diff, full)
-            if _blank(full.get("verdict")):
-                full_problems.append("verdict is empty")
-            state["analysis"] = full
-            state["prose"] = prose
-            state["problems"] = full_problems
-            retry = state["attempt"] < 3
-            if not full_problems:
-                state["ok"] = True
-                return cw_llm.Done({"ok": True})
-            if not retry:
-                return cw_llm.Done({"ok": False, "problems": full_problems})
-            return "gate: " + "\n".join(full_problems) + "\nfix and call submit_analysis again"
+            def handler(args, state=state):
+                state["attempt"] += 1
+                args = args if isinstance(args, dict) else {}
+                fragment = _copy_into_seed(seed, args)
+                _withhold(fragment, withheld)
+                if not validate(raw_diff, fragment, fragment=True):
+                    (d / "batches" / "fragment-1.json").write_text(json.dumps(fragment, indent=2))
+                    cw_store.update_meta(
+                        d, lambda m: (m.setdefault("batches_done", []).append(1) if 1 not in m.get("batches_done", []) else None))
+                    _request_render(d, [1])
 
-        local_handlers = dict(handlers)
-        local_handlers["submit_analysis"] = handler
-        messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}]
-        error = None
-        try:
-            cw_llm.run_tools(
-                profile, messages, tools, local_handlers, max_rounds=10,
-                max_tokens=config["max_conversation_tokens"], timeout=config["timeout_s"],
-                on_usage=_make_on_usage(d, role, on_event, config), cwd=d / "head",
-            )
-        except cw_llm.LLMError as e:
-            error = str(e)
-            last_exc = e
-        _write_transcript(d, role, profile, messages, result=state["ok"], error=error)
+                prose = {
+                    "target": meta["target"],
+                    "overview": args.get("overview") if isinstance(args.get("overview"), str) else "",
+                    "verdict": args.get("verdict") if isinstance(args.get("verdict"), str) else "",
+                }
+                if isinstance(args.get("groups"), list):
+                    prose["groups"] = args["groups"]
+                full = {**{k: v for k, v in prose.items() if k != "target"}, "target": prose["target"],
+                        "files": fragment["files"]}
+                full_problems = validate(raw_diff, full)
+                if _blank(full.get("verdict")):
+                    full_problems.append("verdict is empty")
+                state["analysis"] = full
+                state["prose"] = prose
+                state["problems"] = full_problems
+                retry = state["attempt"] < 3
+                if not full_problems:
+                    state["ok"] = True
+                    return cw_llm.Done({"ok": True})
+                if not retry:
+                    return cw_llm.Done({"ok": False, "problems": full_problems})
+                return "gate: " + "\n".join(full_problems) + "\nfix and call submit_analysis again"
+
+            local_handlers = dict(handlers)
+            local_handlers["submit_analysis"] = handler
+            messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}]
+            error = None
+            exc = None
+            try:
+                cw_llm.run_tools(
+                    profile, messages, tools, local_handlers, max_rounds=10,
+                    max_tokens=config["max_conversation_tokens"], timeout=config["timeout_s"],
+                    on_usage=_make_on_usage(d, role, on_event, config), cwd=d / "head",
+                )
+            except cw_llm.LLMError as e:
+                error = str(e)
+                exc = e
+            _write_transcript(d, role, profile, messages, result=state["ok"], error=error)
+            return state, exc
+
+        state, exc = _retry_flagged(attempt, raw_diff, stub_paths)
+        if exc is not None:
+            last_exc = exc
         if state["ok"]:
             passed, analysis, prose_json = True, state["analysis"], state["prose"]
             break
         if state.get("analysis") is not None:
             analysis, prose_json, problems = state["analysis"], state["prose"], state["problems"]
+        if getattr(exc, "kind", None) == "flagged":
+            break
 
     if passed:
         (d / "prose.json").write_text(json.dumps(prose_json, indent=2))
         (d / "analysis.json").write_text(json.dumps(analysis, indent=2))
-        _emit_step(d, on_event, name, "ok", attempts=attempts, model=model_used)
+        withheld = sorted(fanout.stub_diff(raw_diff, stub_paths)[1])
+        _record_withheld(d, 1, withheld)
+        _emit_step(d, on_event, name, "ok", attempts=attempts, model=model_used, withheld=withheld or None)
         return True
     if not problems and last_exc is not None:
+        remedy = last_exc.remedy
+        if getattr(last_exc, "kind", None) == "flagged":
+            remedy = f"files {', '.join(entry_paths)}: {remedy}"
         _emit_step(d, on_event, name, "failed", attempts=attempts, model=model_used,
-                    error=str(last_exc), remedy=last_exc.remedy)
+                    error=str(last_exc), remedy=remedy)
         cw_store.update_meta(d, lambda m: m.update({"gate": []}))
         return False
     _emit_step(d, on_event, name, "failed", attempts=attempts, model=model_used, lines=problems)
@@ -1788,11 +1867,12 @@ def _split(d, meta, config):
     if total <= config["small_diff_lines"]:
         route = "small"
         args = ["split", "--diff", str(d / "raw.diff"), "--out", str(batches_dir),
-                "--max-batches", "1", "--max-lines", "1000000000"]
+                "--max-batches", "1", "--max-lines", "1000000000", "--max-chars", "1000000000"]
     else:
         route = "fanout"
         args = ["split", "--diff", str(d / "raw.diff"), "--out", str(batches_dir),
-                "--max-lines", str(config["batch_max_lines"])]
+                "--max-lines", str(config["batch_max_lines"]),
+                "--max-chars", str(config["batch_max_chars"])]
     result = subprocess.run([sys.executable, str(SCRIPTS_DIR / "fanout.py"), *args],
                              capture_output=True, text=True)
     if result.returncode != 0:

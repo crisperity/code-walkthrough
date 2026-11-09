@@ -45,6 +45,10 @@ _CLAUDE_RATE_REMEDY = "wait for the reset the message names, or point the role a
 _CLAUDE_AUTH_MARKERS = ("not logged in", "unauthorized", "authentication required")
 _CLAUDE_RATE_MARKERS = ("usage limit", "rate limit", "rate_limit")
 _CLAUDE_CONTEXT_MARKERS = ("prompt is too long", "context length")
+_CLAUDE_FLAGGED_MARKERS = ("safeguards flagged",)
+_CLAUDE_FLAGGED_REMEDY = (
+    "the content of this batch was flagged by model safeguards; retrying or switching model will not help"
+)
 
 _semaphore_lock = threading.Lock()
 _semaphore = threading.BoundedSemaphore(4)
@@ -260,6 +264,8 @@ def _classify_claude_error(parsed, stderr, profile):
         return "rate", _CLAUDE_RATE_REMEDY
     if any(marker in text for marker in _CLAUDE_CONTEXT_MARKERS):
         return "context", f"this batch is too big for {profile.get('model')}: lower batch_max_lines"
+    if any(marker in text for marker in _CLAUDE_FLAGGED_MARKERS):
+        return "flagged", _CLAUDE_FLAGGED_REMEDY
     if parsed.get("subtype") == "error_max_turns":
         return "rounds", None
     return "error", None

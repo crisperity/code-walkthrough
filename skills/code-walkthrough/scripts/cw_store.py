@@ -86,6 +86,7 @@ DEFAULTS = {
     "max_conversation_tokens": 200000,
     "small_diff_lines": 1500,
     "batch_max_lines": 400,
+    "batch_max_chars": 120000,
     "trust": {"repos": [], "orgs": []},
     "repos": {},
     "port": 27183,

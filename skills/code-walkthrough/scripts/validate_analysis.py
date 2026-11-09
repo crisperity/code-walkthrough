@@ -71,6 +71,8 @@ REQUIRED_KEYS = ("target", "overview", "files")
 IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 MIN_IDENTIFIER_LEN = 4
+WITHHELD_NOTE = "content withheld: flagged by model safeguards"
+
 # Per-hunk churn detection (rename/export/import-repoint/qualifier-drop vs. "real" change)
 # is not reliably decidable from a language-independent diff read: on a measured 45-file
 # analysis it produced 49 false rejections, each one genuine churn a subset-of-tokens test
@@ -351,7 +353,7 @@ def validate(diff_text, analysis, fragment=False):
             covered[header] = hunk
             all_hunks.append(hunk)
             body = body_by_prefix.get(header)
-            if not _blank(hunk.get("note")) and body is not None:
+            if not _blank(hunk.get("note")) and hunk["note"].strip() != WITHHELD_NOTE and body is not None:
                 changed = "\n".join(raw for kind, raw in body["lines"] if kind in ("a", "d"))
                 hunk_ids = _identifiers(changed)
                 if hunk_ids and hunk_ids.isdisjoint(_identifiers(hunk["note"])):

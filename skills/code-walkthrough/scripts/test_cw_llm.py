@@ -354,6 +354,7 @@ def test_claude_call_error_kinds():
         "rate": [cw_testlib.claude_result(is_error=True, result="rate limit hit", api_error_status=429)],
         "ctx": [cw_testlib.claude_result(is_error=True, result="Prompt is too long")],
         "nf": [not_found],
+        "flag": [cw_testlib.claude_result(is_error=True, result="API Error: Sonnet 5.5's safeguards flagged this message")],
         "raw": [cw_testlib.claude_raw("not json", exit=1, stderr="boom")],
         "long": [cw_testlib.claude_result(is_error=True, result="z" * 500)],
     }
@@ -370,6 +371,8 @@ def test_claude_call_error_kinds():
             assert error.kind == "context" and "ctx" in error.remedy
             error = failure("nf", name="prof-nf")
             assert error.kind == "notfound" and "prof-nf" in error.remedy
+            error = failure("flag")
+            assert error.kind == "flagged" and "safeguards" in error.remedy
             assert failure("raw").kind == "protocol"
             error = failure("long")
             assert error.kind == "error" and len(str(error)) == 300
